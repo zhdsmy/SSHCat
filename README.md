@@ -1,0 +1,96 @@
+# SSHCat
+
+macOS 菜单栏工具：管理长期运行的 SSH 端口转发。App 不实现 SSH 协议，只以子进程方式执行 `ssh -N`，并在进程退出、系统唤醒或网络变化后按退避重连。
+
+一条规则对应一次 `ssh`：同一个目标上可以混用本地转发（`-L`）、远程转发（`-R`）和动态转发（`-D`）。
+
+## 要求
+
+- macOS 13+（Apple 芯片或 Intel）
+- 系统自带的 `/usr/bin/ssh`（设置里可以改成别的路径）
+- 目标主机已经能用密钥或 ssh-agent 登录。App 使用 `BatchMode=yes`，不会弹出密码框
+- 第一次连接某台新主机前，先在终端里 `ssh` 一次并接受主机密钥（写入 `~/.ssh/known_hosts`）。`BatchMode=yes` 下 ssh 不会询问，未知主机会直接连接失败
+
+## 安装
+
+1. 从 [Releases](https://github.com/zhdsmy/SSHCat/releases) 下载 `SSHCat-<版本>.dmg`，打开后把 SSHCat 拖进“应用程序”。
+2. App 只做了 ad-hoc 签名、没有经过 Apple 公证，首次打开会被拦下：到“系统设置 › 隐私与安全性”点“仍要打开”，或执行 `xattr -dr com.apple.quarantine /Applications/SSHCat.app`。
+3. 可选：用同目录的 `.sha256` 校验下载，`shasum -a 256 -c SSHCat-<版本>.dmg.sha256`。
+
+## 构建
+
+```bash
+./scripts/bundle.sh                  # build/SSHCat.app
+open build/SSHCat.app
+UNIVERSAL=1 ./scripts/make-dmg.sh    # build/SSHCat-<版本>.dmg（arm64 + x86_64）与 .sha256
+```
+
+`bundle.sh` 默认只构建本机架构；`UNIVERSAL=1` 同时构建 arm64 与 x86_64，并用 `lipo` 检查两者都在（发布用）。`make-dmg.sh` 会先调用 `bundle.sh`，版本号取自 `Resources/Info.plist`。
+
+测试与图标：
+
+```bash
+swift build
+swift build --product SSHCatPackageTests && swift test --skip-build
+swift scripts/make-icon.swift   # Resources/AppIcon.icns（菜单栏图标在 Sources/SSHCat/MenuBarIcon.swift 里用代码绘制）
+```
+
+只装了 Command Line Tools 时，`swift test` 需要先单独构建测试产物（上面第二行）；装了 Xcode 可直接 `swift test`。
+
+`swift build` 出来的二进制没有打成 App，会带 Dock 图标。菜单栏形态以 `build/SSHCat.app` 为准。App 只做了 ad-hoc 签名。
+
+开发模式：
+
+```bash
+swift run SSHCat
+```
+
+## 新建一条转发
+
+1. 点菜单栏图标，打开“管理…”。
+2. 新建规则。主机填 `~/.ssh/config` 里的 Host 名，或直接填主机名。用户、端口、密钥留空时沿用该 Host 的配置。
+3. 需要覆盖时再填端口（传给 `-p`）或密钥路径（传给 `-i`，并加上 `IdentitiesOnly=yes`）。
+4. 添加转发：
+   - 本地：本机 `绑定地址:端口` 转到 SSH 服务器能访问的 `目标主机:端口`
+   - 远程：SSH 服务器上的 `绑定地址:端口` 转到本机的 `目标主机:端口`。绑定地址不是回环时，服务器要开 `GatewayPorts`
+   - 动态：本机 SOCKS 代理
+5. 打开规则。状态为“运行中”后，本机对应端口即被占用；关掉规则后端口释放。
+
+例如把远端回环的 8080 转到本机 8080，用户 `app`、主机 `devbox`、一条本地转发，两端都是 `127.0.0.1:8080`。生成的命令形如：
+
+```text
+ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
+  -o ControlMaster=no -o ControlPath=none \
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -o ConnectTimeout=10 -o LogLevel=VERBOSE \
+  -L 127.0.0.1:8080:127.0.0.1:8080 app@devbox
+```
+
+`ControlMaster=no` 让这条连接的生命周期归 App：关掉规则就会停掉转发，而不会挂在用户自己的 ControlMaster 上。`ServerAlive*` 让断掉的会话自己退出，再按指数退避重连。`ExitOnForwardFailure=yes` 让监听端口失败时 ssh 立刻退出，而不是假装还在转发。`ConnectTimeout=10` 让连不上的主机 10 秒内失败。`LogLevel=VERBOSE` 让 ssh 在认证成功后打印 `Authenticated to …`，App 以此判定“运行中”，而不是进程一启动就算成功。
+
+界面可以复制这条等价命令。实际启动一律以 argv 执行，不经 shell。
+
+## 数据位置
+
+`~/Library/Application Support/SSHCat/`（目录 0700；文件 0600，原子写入）
+
+| 文件 | 说明 |
+| --- | --- |
+| `forwards.json` | 转发规则 |
+| `pids.json` | 子进程 pid，崩溃后用于清理孤儿 `ssh` |
+
+偏好设置在 UserDefaults（suite `io.github.zhdsmy.SSHCat`）：`customBinaryPath`、`notificationsEnabled`。登录项由系统的 `SMAppService` 记录。App 不保存密码或私钥内容。
+
+## 实现要点
+
+- `SSHCatCore` 不依赖 SwiftUI，包含模型、参数构造、进程监管；单元测试用 `/bin/sh` 冒充 ssh。
+- 子进程输出由专用线程阻塞读取，避免长期运行的 ssh 占住 GCD 线程。
+- 界面不用 SwiftUI 宏（`@State`、`@Observable`、`#Preview`），以便只装 Command Line Tools 时也能编译。
+
+## 参与开发
+
+开发规范、安全约束、提交格式、版本号规则与发布流程见 [AGENTS.md](AGENTS.md)，变更记录见 [CHANGELOG.md](CHANGELOG.md)。推送 `vX.Y.Z` tag 后，GitHub Actions 会构建 universal DMG 并发布到 Releases。
+
+## 许可证
+
+[MIT](LICENSE)
