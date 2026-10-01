@@ -36,6 +36,89 @@ struct StatusDot: View {
     let state: RunState
     var body: some View {
         Circle().fill(state.color).frame(width: 9, height: 9)
+            .accessibilityLabel(state.label)
+    }
+}
+
+struct NewRuleMenu: View {
+    let action: (ForwardKind) -> Void
+
+    var body: some View {
+        Menu {
+            Button("本地转发 · 访问远端服务") { action(.local) }
+            Button("远程转发 · 分享本机服务") { action(.remote) }
+            Button("SOCKS 代理 · 动态转发") { action(.dynamic) }
+        } label: {
+            Label("新建转发", systemImage: "plus")
+        }
+    }
+}
+
+struct SettingsButton: View {
+    var body: some View {
+        Group {
+            if #available(macOS 14, *) {
+                SettingsLink { Image(systemName: "gearshape") }
+            } else {
+                Button {
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } label: { Image(systemName: "gearshape") }
+            }
+        }
+        .help("设置").accessibilityLabel("设置")
+    }
+}
+
+struct StorageNotice: View {
+    @EnvironmentObject var manager: ForwardManager
+
+    var body: some View {
+        if manager.loadError != nil || manager.saveError != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if let error = manager.loadError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("重新加载配置") { manager.reloadRules() }
+                }
+                if let error = manager.saveError {
+                    Label("保存失败：\(error)", systemImage: "exclamationmark.triangle")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("修改尚未应用。检查文件权限和可用空间后，请重试刚才的操作。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.06))
+        }
+    }
+}
+
+struct CopyButton: View {
+    let text: String
+    var label = "复制"
+    var iconOnly = false
+    @ViewState private var copied = false
+
+    var body: some View {
+        Button {
+            Clipboard.copy(text)
+            copied = true
+        } label: {
+            if iconOnly {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+            } else {
+                Label(copied ? "已复制" : label, systemImage: copied ? "checkmark" : "doc.on.doc")
+            }
+        }
+        .help(copied ? "已复制" : label)
+        .accessibilityLabel(copied ? "已复制" : label)
+        .task(id: copied) {
+            guard copied else { return }
+            do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
+            copied = false
+        }
     }
 }
 

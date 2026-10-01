@@ -31,6 +31,7 @@ swift build --product SSHCatPackageTests && swift test --skip-build   # 单测�
 UNIVERSAL=1 ./scripts/make-dmg.sh          # build/SSHCat-<版本>.dmg + .sha256（arm64 + x86_64）
 ./scripts/release-notes.sh <版本>          # 打印该版本的 Release 正文
 swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
+./scripts/snapshot.sh [--dark]             # 临时规则 + 假 ssh，渲染界面到 build/snapshots[-dark]/
 ```
 
 图标：App 图标由 `scripts/make-icon.swift` 矢量绘制，改图后重新运行并提交生成的 `Resources/AppIcon.icns`。菜单栏图标不在资源里，而是在 `Sources/SSHCat/MenuBarIcon.swift` 中用代码绘制（模板图像，空闲为描边、有转发运行时为实心）；`MenuBarExtra` 按名字只会去 asset catalog 里找图，裸 SwiftPM 可执行文件没有它，所以不要改回按名字加载。
@@ -53,6 +54,8 @@ swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
 - 【MUST NOT】自动化流程（Agent、脚本、CI）对真实用户数据启动 App 或真实 ssh 连接；单测用 `/bin/sh` 假 ssh。
 
 ## Git 与提交
+
+界面修改后使用 `snapshot.sh` 检查深浅色及相关异常状态；README 截图保存在 `docs/screenshots/`，只能来自该隔离快照。快照不包含标题栏、工具栏和真实交互，不启动使用真实数据的 App 来补拍。
 
 - 功能开发用短分支 + PR，合入 `main` 前须 CI 的 `build-test` 通过。
 - 【MUST】提交信息遵循 Conventional Commits：`<type>(<scope>): <subject>`，type 取 `feat` / `fix` / `refactor` / `docs` / `test` / `build` / `ci` / `chore`；subject 简短，中英文皆可。

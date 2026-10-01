@@ -6,56 +6,72 @@ struct ManageView: View {
     @EnvironmentObject var manager: ForwardManager
     @EnvironmentObject var navigation: Navigation
     @ViewState private var hosts: [String] = []
+    var snapshotMode = false
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $navigation.selection) {
-                ForEach(manager.runners) { runner in
-                    SidebarRow(runner: runner, unsaved: navigation.drafts[runner.id] != nil)
-                        .tag(runner.id)
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-            .background(SplitSeamAlign())
-            .toolbar {
-                ToolbarItem {
-                    Button(action: add) {
-                        Image(systemName: "plus")
+        VStack(spacing: 0) {
+            StorageNotice()
+            NavigationSplitView {
+                VStack(spacing: 0) {
+                    TextField("搜索名称、主机或端口", text: $navigation.searchText)
+                        .textFieldStyle(.roundedBorder).padding(10)
+                    List(selection: $navigation.selection) {
+                        ForEach(manager.runners.filter { $0.rule.matches(navigation.searchText) }) { runner in
+                            SidebarRow(runner: runner, unsaved: navigation.drafts[runner.id] != nil)
+                                .tag(runner.id)
+                        }
+                        if !navigation.searchText.isEmpty,
+                           !manager.runners.contains(where: { $0.rule.matches(navigation.searchText) }) {
+                            Text("没有匹配的转发").font(.callout).foregroundStyle(.secondary)
+                        }
                     }
-                    .help("新建转发")
+                    .listStyle(.sidebar)
+                    Divider()
+                    Button {
+                        navigation.selection = nil
+                        navigation.showingGuide = true
+                    } label: {
+                        Label("使用说明", systemImage: "questionmark.circle")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain).padding(12)
                 }
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+                .background(SplitSeamAlign())
+                .toolbar {
+                    ToolbarItem {
+                        NewRuleMenu { navigation.add($0, using: manager) }
+                            .disabled(!manager.canEditRules)
+                    }
+                }
+            } detail: {
+                detail.frame(minWidth: 480)
             }
-        } detail: {
-            detail
         }
-        .onAppear { hosts = SSHConfigHosts.load() }
+        .frame(minWidth: 740, minHeight: 500)
+        .onAppear { if !snapshotMode { hosts = SSHConfigHosts.load() } }
+        .onChange(of: navigation.selection) { id in
+            if id != nil { navigation.showingGuide = false }
+        }
     }
 
     @ViewBuilder private var detail: some View {
-        if let id = navigation.selection, let runner = manager.runner(id: id) {
-            RuleEditor(runner: runner, hosts: hosts, saved: navigation.drafts[id])
+        if navigation.showingGuide || manager.runners.isEmpty {
+            UsageGuide()
+        } else if let id = navigation.selection, let runner = manager.runner(id: id) {
+            RuleEditor(runner: runner, hosts: hosts, saved: navigation.drafts[id], snapshotMode: snapshotMode)
                 .id(runner.id)
         } else {
-            VStack(spacing: 12) {
-                if manager.binaryPath == nil {
-                    Text("找不到 ssh。打开设置，填写 ssh 的绝对路径。")
-                }
-                if let loadError = manager.loadError {
-                    Text(loadError).foregroundStyle(.red).multilineTextAlignment(.center)
-                }
-                Text("选择一条转发，或新建一条。").foregroundStyle(.secondary)
-                Button("新建转发", action: add)
+            VStack(spacing: 16) {
+                Image(systemName: "network").font(.system(size: 36)).foregroundStyle(.secondary)
+                Text("管理你的 SSH 转发").font(.title2.weight(.semibold))
+                Text("从左侧选择规则，查看连接状态或修改配置。")
+                    .foregroundStyle(.secondary)
+                NewRuleMenu { navigation.add($0, using: manager) }
+                    .disabled(!manager.canEditRules)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
         }
-    }
-
-    private func add() {
-        let rule = ForwardRule(name: "新转发", forwards: [PortForward()])
-        manager.add(rule)
-        navigation.selection = rule.id
     }
 }
 
@@ -64,16 +80,19 @@ private struct SidebarRow: View {
     let unsaved: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatusDot(state: runner.state)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(runner.rule.name).lineLimit(1)
+        HStack(alignment: .top, spacing: 8) {
+            StatusDot(state: runner.state).padding(.top, 4)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(runner.rule.name).fontWeight(.medium).lineLimit(1).help(runner.rule.name)
+                Text(runner.rule.destination.isEmpty ? "等待配置主机" : runner.rule.destination)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .help(runner.rule.destination)
                 Text(unsaved ? "未保存 · \(runner.state.label)" : runner.state.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .font(.caption).foregroundStyle(unsaved ? .orange : runner.state.color)
+                    .lineLimit(1).help(runner.state.reason ?? runner.state.label)
             }
         }
+        .padding(.vertical, 3)
     }
 }
 
@@ -190,39 +209,52 @@ private struct RuleEditor: View {
     @EnvironmentObject var manager: ForwardManager
     @EnvironmentObject var navigation: Navigation
     let hosts: [String]
+    let snapshotMode: Bool
 
     @ViewState private var draft: ForwardRule
     @ViewState private var portText: String
     @ViewState private var confirmDelete = false
+    @ViewState private var showLog = false
 
     /// `saved` is an unsaved draft from an earlier visit to this rule.
-    init(runner: ForwardRunner, hosts: [String], saved: RuleDraft?) {
+    init(runner: ForwardRunner, hosts: [String], saved: RuleDraft?, snapshotMode: Bool = false) {
         self.runner = runner
         self.hosts = hosts
+        self.snapshotMode = snapshotMode
         _draft = ViewState(initialValue: saved?.rule ?? runner.rule)
         _portText = ViewState(initialValue: saved?.portText ?? runner.rule.port.map(String.init) ?? "")
         _confirmDelete = ViewState(initialValue: false)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                targetSection
-                forwardsSection
-                runSection
+        VStack(spacing: 0) {
+            header.padding(20)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if runner.state.reason != nil { StateDetail(state: runner.state) }
+                    GroupBox { targetSection.padding(8) }
+                    GroupBox { forwardsSection.padding(8) }
+                    GroupBox { runSection.padding(8) }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onChange(of: draft) { _ in keepDraft() }
         .onChange(of: portText) { _ in keepDraft() }
+        .onChange(of: runner.rule) { rule in
+            // A reload may replace saved settings; keep real edits, refresh an untouched editor.
+            guard navigation.drafts[runner.id] == nil else { return }
+            draft = rule
+            portText = rule.port.map(String.init) ?? ""
+        }
         .confirmationDialog("删除这条转发？", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 let id = runner.id
+                guard manager.remove(id: id) else { return }
                 navigation.selection = nil
                 navigation.drafts[id] = nil
-                manager.remove(id: id)
             }
             Button("取消", role: .cancel) {}
         }
@@ -230,61 +262,82 @@ private struct RuleEditor: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack {
                 TextField("名称", text: $draft.name)
                     .textFieldStyle(.roundedBorder)
                     .font(.title2)
-                Spacer()
+                    .accessibilityLabel("转发名称")
+                Menu {
+                    Button("创建副本") {
+                        let copy = runner.rule.duplicate()
+                        guard manager.add(copy) else { return }
+                        navigation.show(copy.id)
+                    }
+                    .disabled(isDirty || !manager.canEditRules)
+                    Divider()
+                    Button("删除转发…", role: .destructive) { confirmDelete = true }
+                        .disabled(!manager.canEditRules)
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("更多操作").accessibilityLabel("更多操作")
+            }
+            HStack {
                 StatusDot(state: runner.state)
                 Text(runner.state.label).font(.callout).lineLimit(1)
+                    .help(runner.state.reason ?? runner.state.label)
+                Spacer()
                 Toggle("运行", isOn: Binding(
                     get: { runner.state.isActive },
                     set: { manager.setActive($0, id: runner.id) }
                 ))
                 .toggleStyle(.switch)
                 // The toggle runs the saved rule; starting it with edits pending would run stale settings.
-                .disabled(isDirty && !runner.state.isActive)
+                .disabled((isDirty || parsedRule == nil) && !runner.state.isActive)
                 .help(isDirty && !runner.state.isActive ? "有未保存的修改，先保存再运行" : "")
                 Button("保存", action: save)
-                    .disabled(saveDisabled)
+                    .disabled(saveDisabled || !manager.canEditRules)
                     .keyboardShortcut("s", modifiers: .command)
-                Button("删除", role: .destructive) { confirmDelete = true }
             }
             if isDirty {
                 HStack(spacing: 8) {
-                    Text(runner.state.isActive ? "有未保存的修改。保存后会按新配置重启。" : "有未保存的修改。")
+                    Text(runner.state.isActive ? "有未保存的修改。保存连接参数后会重启。" : "有未保存的修改。")
                     Button("还原", action: revert).buttonStyle(.link)
                 }
                 .font(.caption)
                 .foregroundStyle(.orange)
             }
-            StateDetail(state: runner.state)
         }
     }
 
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("目标").font(.headline)
-            TextField("用户（留空则用 SSH 配置）", text: $draft.user)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                TextField("主机", text: $draft.host)
-                    .textFieldStyle(.roundedBorder)
-                if !hosts.isEmpty {
-                    Menu("从 SSH 配置选择") {
-                        ForEach(hosts, id: \.self) { host in
-                            Button(host) { draft.host = host }
-                        }
+            LabeledContent("主机") {
+                HStack {
+                    TextField("SSH Host 或主机名", text: $draft.host)
+                        .textFieldStyle(.roundedBorder)
+                    if !hosts.isEmpty {
+                        Menu {
+                            ForEach(hosts, id: \.self) { host in
+                                Button(host) { draft.host = host }
+                            }
+                        } label: { Image(systemName: "list.bullet") }
+                        .fixedSize().help("从 SSH 配置选择").accessibilityLabel("从 SSH 配置选择")
                     }
-                    .fixedSize()
                 }
             }
-            TextField("端口（留空则用 SSH 配置）", text: $portText)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                TextField("密钥路径（留空则用 SSH 配置或 agent）", text: $draft.identityFile)
-                    .textFieldStyle(.roundedBorder)
-                Button("选择…") { chooseIdentity() }
+            LabeledContent("用户") {
+                TextField("留空使用 SSH 配置", text: $draft.user).textFieldStyle(.roundedBorder)
+            }
+            LabeledContent("端口") {
+                TextField("留空使用 SSH 配置", text: $portText).textFieldStyle(.roundedBorder)
+            }
+            LabeledContent("密钥") {
+                HStack {
+                    TextField("留空使用 SSH 配置或 agent", text: $draft.identityFile)
+                        .textFieldStyle(.roundedBorder)
+                    Button("选择…") { chooseIdentity() }
+                }
             }
             Text("端口和密钥留空时，ssh 会使用这个 Host 在配置里的 Port、IdentityFile 和 ProxyJump。")
                 .font(.caption)
@@ -297,7 +350,13 @@ private struct RuleEditor: View {
             HStack {
                 Text("转发").font(.headline)
                 Spacer()
-                Button("添加") { draft.forwards.append(PortForward()) }
+                Menu("添加") {
+                    ForEach(ForwardKind.allCases, id: \.self) { kind in
+                        Button(kind == .dynamic ? "SOCKS 代理" : "\(kind.label)转发") {
+                            draft.forwards.append(PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080))
+                        }
+                    }
+                }.fixedSize()
             }
             if draft.forwards.isEmpty {
                 Text("至少需要一条转发。").font(.caption).foregroundStyle(.secondary)
@@ -324,37 +383,48 @@ private struct RuleEditor: View {
             if case .failure(let issue) = parsed() {
                 Text(issue.localizedDescription).foregroundStyle(.red).font(.callout)
             }
-            Text("等价命令").font(.subheadline)
-            Text(commandText)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button("复制命令") { Clipboard.copy(commandText) }
-                .disabled(parsedRule == nil)
-            Text("ssh 认证成功后显示“运行中”，之后通常没有输出；状态保持“运行中”就表示转发还在。")
+            let endpoints = runner.rule.forwards.compactMap(\.localEndpoint)
+            if !endpoints.isEmpty, (try? runner.rule.validate()) != nil {
+                LabeledContent("本地地址") {
+                    Text(endpoints.joined(separator: "\n")).font(.callout.monospaced()).textSelection(.enabled)
+                    CopyButton(text: endpoints.joined(separator: "\n"), label: "复制本地地址", iconOnly: true)
+                        .buttonStyle(.borderless)
+                }
+            }
+            Text("“运行中”表示 SSH 会话已建立；访问服务还需确认目标端口可用。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack {
-                Text("日志").font(.subheadline)
-                Spacer()
-                Button("复制诊断信息") { Clipboard.copy(diagnostics) }
-            }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(runner.log.isEmpty ? "还没有输出" : runner.log.joined(separator: "\n"))
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
+            DisclosureGroup("等价命令") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(commandText)
+                        .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                    Color.clear.frame(height: 1).id(logEnd)
-                }
-                .frame(height: 200)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .onAppear { proxy.scrollTo(logEnd, anchor: .bottom) }
-                // Not `log.count`: it stops changing once the log reaches capacity.
-                .onChange(of: runner.log) { _ in proxy.scrollTo(logEnd, anchor: .bottom) }
+                    CopyButton(text: commandText, label: "复制命令").disabled(parsedRule == nil)
+                }.padding(.top, 6)
             }
+            DisclosureGroup("连接日志", isExpanded: $showLog) {
+                logView.padding(.top, 6)
+            }
+            CopyButton(text: diagnostics, label: "复制诊断信息")
+        }
+    }
+
+    private var logView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(runner.log.isEmpty ? "还没有输出" : runner.log.joined(separator: "\n"))
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                Color.clear.frame(height: 1).id(logEnd)
+            }
+            .frame(height: 200)
+            .background(Color.primary.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .onAppear { proxy.scrollTo(logEnd, anchor: .bottom) }
+            // Not `log.count`: it stops changing once the log reaches capacity.
+            .onChange(of: runner.log) { _ in proxy.scrollTo(logEnd, anchor: .bottom) }
         }
     }
 
@@ -371,7 +441,7 @@ private struct RuleEditor: View {
         )
     }
 
-    private var executable: String { manager.binaryPath ?? "/usr/bin/ssh" }
+    private var executable: String { snapshotMode ? "/usr/bin/ssh" : manager.binaryPath ?? "/usr/bin/ssh" }
 
     private var commandText: String {
         guard let rule = parsedRule else { return "配置还不完整，无法生成命令" }
@@ -398,7 +468,7 @@ private struct RuleEditor: View {
 
     private func save() {
         guard let rule = parsedRule else { return }
-        manager.update(rule)
+        guard manager.update(rule) else { return }
         draft = rule
         portText = savedPortText
         navigation.drafts[runner.id] = nil
@@ -471,6 +541,7 @@ private struct ForwardRow: View {
                 Button("删除", action: onDelete)
             }
             HStack {
+                Text(forward.kind == .remote ? "远端监听" : "本机监听").font(.caption).frame(width: 60, alignment: .leading)
                 TextField("绑定地址", text: $forward.bindAddress)
                     .textFieldStyle(.roundedBorder)
                 TextField("端口", value: $forward.bindPort, format: IntegerFormatStyle<Int>().grouping(.never))
@@ -479,6 +550,7 @@ private struct ForwardRow: View {
             }
             if forward.kind != .dynamic {
                 HStack {
+                    Text(forward.kind == .local ? "远端目标" : "本机目标").font(.caption).frame(width: 60, alignment: .leading)
                     TextField(forward.kind == .local ? "远端目标主机" : "本机目标主机", text: $forward.targetHost)
                         .textFieldStyle(.roundedBorder)
                     TextField("端口", value: $forward.targetPort, format: IntegerFormatStyle<Int>().grouping(.never))
