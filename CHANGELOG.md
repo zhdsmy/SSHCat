@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-02
+
 ### 新增
 
 - 借鉴 TailCat 的原生菜单栏与管理体验：按名称、主机或端口搜索，三类转发快捷新建、规则副本、内置使用说明及复制反馈。
@@ -37,5 +39,6 @@
 - 数据文件 0600、目录 0700、原子写入；不保存密码或私钥内容。
 - 以 universal（Apple 芯片 + Intel）DMG 发布，ad-hoc 签名，未经 Apple 公证。
 
-[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/zhdsmy/SSHCat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/zhdsmy/SSHCat/releases/tag/v0.1.0
