@@ -2,6 +2,25 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)（规则见 [AGENTS.md](AGENTS.md#版本号与发布)）。
 
+## [Unreleased]
+
+### 新增
+
+- 借鉴 TailCat 的原生菜单栏与管理体验：按名称、主机或端口搜索，三类转发快捷新建、规则副本、内置使用说明及复制反馈。
+- 设置中手动检查 GitHub 最新版本并打开下载页，仅在点击检查时联网。
+- 隔离的 debug 界面快照与 README 示例截图，覆盖深浅色、空白、失败、重连、草稿、搜索、窄窗口、长名称和配置错误。
+
+### 优化
+
+- 菜单显示状态文字与运行数量，多规则可滚动；详情固定操作栏，目标和转发字段保留标签，日志与等价命令可折叠。
+- macOS 14 及以上通过原生 SettingsLink 打开设置，macOS 13 保留兼容入口。
+
+### 修复
+
+- 先保存再应用规则变更；保存失败不丢失草稿、不重启或删除原连接，错误提示在菜单和管理窗口可见。
+- 区分不存在、读取失败、未来版本与损坏配置；备份失败时阻止覆盖，修复后可重新加载，保持 v1 数据兼容。
+- 菜单与详情一致阻止启动有未保存修改的已停止规则；副本使用独立 ID 且默认不自动启动。
+
 ## [0.1.0] - 2026-09-30
 
 首个公开版本。
@@ -18,4 +37,5 @@
 - 数据文件 0600、目录 0700、原子写入；不保存密码或私钥内容。
 - 以 universal（Apple 芯片 + Intel）DMG 发布，ad-hoc 签名，未经 Apple 公证。
 
+[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/zhdsmy/SSHCat/releases/tag/v0.1.0

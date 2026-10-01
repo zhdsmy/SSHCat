@@ -3,11 +3,17 @@ import Foundation
 public enum ForwardStoreError: Error, LocalizedError {
     /// The file could not be decoded; it was moved aside to `backup` so it is not overwritten.
     case corrupt(backup: URL)
+    case unsupportedVersion(Int)
+    case writeBlocked(String)
 
     public var errorDescription: String? {
         switch self {
         case .corrupt(let backup):
             return "数据文件已损坏，已备份到 \(backup.path)，当前从空列表开始。"
+        case .unsupportedVersion(let version):
+            return "数据文件版本 \(version) 不受支持，已保留原文件，请使用兼容的 SSHCat 版本。"
+        case .writeBlocked(let reason):
+            return "配置未能载入，已阻止覆盖：\(reason)。请修复文件后重新加载。"
         }
     }
 }
@@ -43,11 +49,12 @@ public enum SecureFile {
     }
 
     /// Moves an undecodable file aside so the next save does not destroy it.
-    public static func quarantine(_ url: URL) -> URL {
+    public static func quarantine(_ url: URL) throws -> URL {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let base = url.deletingPathExtension().lastPathComponent
-        let backup = url.deletingLastPathComponent().appendingPathComponent("\(base).corrupt-\(stamp).json")
-        try? FileManager.default.moveItem(at: url, to: backup)
+        let backup = url.deletingLastPathComponent()
+            .appendingPathComponent("\(base).corrupt-\(stamp)-\(UUID().uuidString).json")
+        try FileManager.default.moveItem(at: url, to: backup)
         return backup
     }
 }
@@ -59,9 +66,14 @@ public final class ForwardStore: @unchecked Sendable {
         var rules: [ForwardRule]
     }
 
+    private struct Version: Decodable {
+        var version: Int
+    }
+
     public static let currentVersion = 1
 
     public let directory: URL
+    private var loadFailure: String?
     public var fileURL: URL { directory.appendingPathComponent("forwards.json") }
 
     public init(directory: URL) {
@@ -74,15 +86,47 @@ public final class ForwardStore: @unchecked Sendable {
     }
 
     public func load() throws -> [ForwardRule] {
-        guard let data = SecureFile.read(fileURL) else { return [] }
+        let data: Data
         do {
-            return try JSONDecoder().decode(FileFormat.self, from: data).rules
+            data = try Data(contentsOf: fileURL)
         } catch {
-            throw ForwardStoreError.corrupt(backup: SecureFile.quarantine(fileURL))
+            let code = (error as? CocoaError)?.code
+            if code == .fileReadNoSuchFile || code == .fileNoSuchFile {
+                loadFailure = nil
+                return []
+            }
+            loadFailure = error.localizedDescription
+            throw error
+        }
+
+        do {
+            let version = try JSONDecoder().decode(Version.self, from: data).version
+            guard version == Self.currentVersion else {
+                throw ForwardStoreError.unsupportedVersion(version)
+            }
+            let rules = try JSONDecoder().decode(FileFormat.self, from: data).rules
+            loadFailure = nil
+            return rules
+        } catch let error as ForwardStoreError {
+            loadFailure = error.localizedDescription
+            throw error
+        } catch {
+            let backup: URL
+            do {
+                backup = try SecureFile.quarantine(fileURL)
+            } catch {
+                loadFailure = error.localizedDescription
+                throw error
+            }
+            loadFailure = nil
+            throw ForwardStoreError.corrupt(backup: backup)
         }
     }
 
     public func save(_ rules: [ForwardRule]) throws {
+        if let loadFailure {
+            throw ForwardStoreError.writeBlocked(loadFailure)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try SecureFile.write(encoder.encode(FileFormat(version: Self.currentVersion, rules: rules)), to: fileURL)

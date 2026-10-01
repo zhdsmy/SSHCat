@@ -5,6 +5,15 @@ import SSHCatCore
 @preconcurrency import UserNotifications
 
 @main
+enum Entry {
+    @MainActor static func main() {
+        #if DEBUG
+        if CommandLine.arguments.contains("--snapshot") { Snapshot.run(arguments: CommandLine.arguments) }
+        #endif
+        SSHCatApp.main()
+    }
+}
+
 struct SSHCatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
@@ -41,9 +50,24 @@ struct SSHCatApp: App {
 @MainActor
 final class Navigation: ObservableObject {
     @Published var selection: UUID?
+    @Published var showingGuide = false
+    @Published var searchText = ""
     /// Unsaved edits by rule. Kept here, not in the editor, so switching rules or closing the
     /// window does not throw them away.
     @Published var drafts: [UUID: RuleDraft] = [:]
+
+    func show(_ id: UUID) {
+        searchText = ""
+        showingGuide = false
+        selection = id
+    }
+
+    func add(_ kind: ForwardKind, using manager: ForwardManager) {
+        let rule = ForwardRule(name: kind == .dynamic ? "SOCKS 代理" : "\(kind.label)转发",
+                               forwards: [PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080)])
+        guard manager.add(rule) else { return }
+        show(rule.id)
+    }
 }
 
 struct RuleDraft: Equatable {

@@ -199,6 +199,26 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
         return user.isEmpty ? host : "\(user)@\(host)"
     }
 
+    /// A copy must not inherit launch-on-open or any IDs used by the list and editor.
+    public func duplicate() -> ForwardRule {
+        var copy = self
+        copy.id = UUID()
+        copy.name += " 副本"
+        copy.autoStart = false
+        copy.forwards = forwards.map { forward in
+            var copy = forward
+            copy.id = UUID()
+            return copy
+        }
+        return copy
+    }
+
+    public func matches(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || ([name, destination] + forwards.map(\.summary))
+            .contains { $0.localizedStandardContains(query) }
+    }
+
     public func validate() throws {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { throw ForwardIssue.emptyName }
