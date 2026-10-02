@@ -36,7 +36,11 @@ public enum L10n {
 
     private static let bundles: [AppLanguage: Bundle] = Dictionary(uniqueKeysWithValues:
         AppLanguage.allCases.filter { $0 != .system }.map { language in
-            guard let url = resourceBundle.url(forResource: language.rawValue, withExtension: "lproj"),
+            // SwiftPM toolchains differ in whether they lowercase script identifiers on disk.
+            let identifier = resourceBundle.localizations.first {
+                $0.caseInsensitiveCompare(language.rawValue) == .orderedSame
+            } ?? language.rawValue
+            guard let url = resourceBundle.url(forResource: identifier, withExtension: "lproj"),
                   let bundle = Bundle(url: url) else {
                 preconditionFailure("Missing localization resources: \(language.rawValue)")
             }
