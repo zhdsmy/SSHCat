@@ -6,11 +6,11 @@ extension RunState {
     /// One line for lists. The countdown and full reason live in `StateDetail`, which can refresh.
     var label: String {
         switch self {
-        case .stopped: return "已停止"
-        case .starting: return "连接中…"
-        case .running: return "运行中"
-        case .reconnecting(let attempt, _, _): return "重连中（第 \(attempt) 次）"
-        case .failed(let reason): return "失败：\(reason)"
+        case .stopped: return L10n.text("state.stopped")
+        case .starting: return L10n.text("state.starting")
+        case .running: return L10n.text("state.running")
+        case .reconnecting(let attempt, _, _): return L10n.text("state.reconnecting", attempt)
+        case .failed(let reason): return L10n.text("state.failed", reason)
         }
     }
 
@@ -45,11 +45,11 @@ struct NewRuleMenu: View {
 
     var body: some View {
         Menu {
-            Button("本地转发 · 访问远端服务") { action(.local) }
-            Button("远程转发 · 分享本机服务") { action(.remote) }
-            Button("SOCKS 代理 · 动态转发") { action(.dynamic) }
+            Button(L10n.text("action.new_local")) { action(.local) }
+            Button(L10n.text("action.new_remote")) { action(.remote) }
+            Button(L10n.text("action.new_dynamic")) { action(.dynamic) }
         } label: {
-            Label("新建转发", systemImage: "plus")
+            Label(L10n.text("action.new_forward"), systemImage: "plus")
         }
     }
 }
@@ -66,7 +66,7 @@ struct SettingsButton: View {
                 } label: { Image(systemName: "gearshape") }
             }
         }
-        .help("设置").accessibilityLabel("设置")
+        .help(L10n.text("action.settings")).accessibilityLabel(L10n.text("action.settings"))
     }
 }
 
@@ -79,12 +79,12 @@ struct StorageNotice: View {
                 if let error = manager.loadError {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("重新加载配置") { manager.reloadRules() }
+                    Button(L10n.text("action.reload")) { manager.reloadRules() }
                 }
                 if let error = manager.saveError {
-                    Label("保存失败：\(error)", systemImage: "exclamationmark.triangle")
+                    Label(L10n.text("storage.save_failed", error), systemImage: "exclamationmark.triangle")
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("修改尚未应用。检查文件权限和可用空间后，请重试刚才的操作。")
+                    Text(L10n.text("storage.retry_hint"))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -97,7 +97,7 @@ struct StorageNotice: View {
 
 struct CopyButton: View {
     let text: String
-    var label = "复制"
+    var label = L10n.text("action.copy")
     var iconOnly = false
     @ViewState private var copied = false
 
@@ -109,11 +109,11 @@ struct CopyButton: View {
             if iconOnly {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
             } else {
-                Label(copied ? "已复制" : label, systemImage: copied ? "checkmark" : "doc.on.doc")
+                Label(copied ? L10n.text("action.copied") : label, systemImage: copied ? "checkmark" : "doc.on.doc")
             }
         }
-        .help(copied ? "已复制" : label)
-        .accessibilityLabel(copied ? "已复制" : label)
+        .help(copied ? L10n.text("action.copied") : label)
+        .accessibilityLabel(copied ? L10n.text("action.copied") : label)
         .task(id: copied) {
             guard copied else { return }
             do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
@@ -130,11 +130,14 @@ struct StateDetail: View {
         VStack(alignment: .leading, spacing: 4) {
             switch state {
             case .reconnecting(let attempt, let retryAt, _):
-                // `.timer` redraws itself; a string computed once would freeze at its first value.
-                (Text("重连中（第 \(attempt) 次），") + Text(retryAt, style: .timer) + Text(" 后重试"))
-                    .foregroundStyle(.orange)
+                // Keep the entire sentence localizable while refreshing the countdown.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(L10n.text("state.retry_countdown", attempt,
+                                   max(0, Int(retryAt.timeIntervalSince(context.date).rounded(.up)))))
+                        .foregroundStyle(.orange)
+                }
             case .failed:
-                Text("已失败，不会自动重连。修正后重新打开规则。").foregroundStyle(.red)
+                Text(L10n.text("state.failed_hint")).foregroundStyle(.red)
             default:
                 EmptyView()
             }
@@ -161,7 +164,7 @@ enum Clipboard {
 
 var appVersion: String {
     let info = Bundle.main.infoDictionary
-    let short = info?["CFBundleShortVersionString"] as? String ?? "开发版"
+    let short = info?["CFBundleShortVersionString"] as? String ?? L10n.text("app.development_version")
     let build = info?["CFBundleVersion"] as? String
     return build.map { "\(short) (\($0))" } ?? short
 }

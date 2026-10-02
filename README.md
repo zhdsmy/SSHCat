@@ -1,5 +1,7 @@
 # SSHCat
 
+**简体中文** · [English](README.en.md)
+
 macOS 菜单栏工具：管理长期运行的 SSH 端口转发。App 不实现 SSH 协议，只以子进程方式执行 `ssh -N`，并在进程退出、系统唤醒或网络变化后按退避重连。
 
 一条规则对应一次 `ssh`：同一个目标上可以混用本地转发（`-L`）、远程转发（`-R`）和动态转发（`-D`）。
@@ -26,6 +28,12 @@ macOS 菜单栏工具：管理长期运行的 SSH 端口转发。App 不实现 S
 
 设置中的“检查更新”仅在点击时访问 GitHub；发现新版本后，从下载页获取 DMG 替换 App，不会自动安装。
 
+## 语言
+
+支持 English、简体中文和繁體中文。默认跟随系统语言；系统语言不受支持时回退到英语。可在“设置 › 通用 › 语言”选择覆盖语言，下次启动生效，切换设置不会重启或中断正在运行的转发。
+
+菜单、管理窗口、使用说明、校验错误、通知与诊断共用语言资源。规则名称等用户数据、SSH 命令及 SSH 原始日志保持原样，不会因为切换语言改写已保存的规则。
+
 ## 构建
 
 ```bash
@@ -49,8 +57,9 @@ swift scripts/make-icon.swift   # Resources/AppIcon.icns（菜单栏图标在 So
 安全检查界面：
 
 ```bash
-./scripts/snapshot.sh          # build/snapshots/，浅色
-./scripts/snapshot.sh --dark   # build/snapshots-dark/，深色
+./scripts/snapshot.sh --language=en          # build/snapshots-en/
+./scripts/snapshot.sh --language=zh-Hans     # build/snapshots-zh-Hans/
+./scripts/snapshot.sh --language=zh-Hant --dark # build/snapshots-zh-Hant-dark/
 ```
 
 快照入口仅在 debug 构建中可用，使用临时数据、隔离偏好和 `/bin/sh` 假 ssh；不读取真实规则或 `~/.ssh/config`，不触碰登录项，也不建立真实 SSH 连接。覆盖正常、空白、失败、重连、未保存草稿、搜索、长名称、多规则、更新提示与不支持的数据版本；滚动页面会追加 `-scroll-N` 图片。图片不含标题栏和工具栏，未聚焦窗口的开关可能显示灰色；快照不代替点击、键盘与系统窗口交互测试。
@@ -101,7 +110,7 @@ ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
 | `forwards.json` | 转发规则 |
 | `pids.json` | 子进程 pid，崩溃后用于清理孤儿 `ssh` |
 
-偏好设置在 UserDefaults（suite `io.github.zhdsmy.SSHCat`）：`customBinaryPath`、`notificationsEnabled`。登录项由系统的 `SMAppService` 记录。App 不保存密码或私钥内容。
+偏好设置在 UserDefaults（suite `io.github.zhdsmy.SSHCat`）：`customBinaryPath`、`notificationsEnabled`、`language`。旧版本没有语言设置时自动跟随系统。登录项由系统的 `SMAppService` 记录。App 不保存密码或私钥内容。
 
 规则新增、修改和删除均先保存成功再更新界面与进程；保存失败时保留原规则、运行中的连接和编辑草稿，并显示可重试的错误。读取失败或数据版本不受支持时保留原文件并禁止覆盖，修复后可“重新加载配置”。损坏的 JSON 仅在成功备份后才允许从空列表继续；备份失败会阻止保存。数据格式仍为 v1，旧规则继续兼容。
 
@@ -112,6 +121,10 @@ ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
 - 界面不用 SwiftUI 宏（`@State`、`@Observable`、`#Preview`），以便只装 Command Line Tools 时也能编译。
 
 ## 参与开发
+
+本地化采用 SwiftPM 的原生 `.lproj/*.strings` 资源，位于 `Sources/SSHCatCore/Resources/`。`Localizable.strings` 保存界面文案，`Core.strings` 保存模型、错误、通知和诊断文案，均通过 Foundation 层的 `L10n` 读取；新增文案使用稳定的英文语义键，并同时更新 `en`、`zh-Hans`、`zh-Hant`。参数使用 `%@`、`%ld`，需要调整语序时使用位置参数，不拼接翻译后的句子。
+
+测试检查语言匹配、三种语言键的完整性、格式参数一致性与源码引用；打包脚本把 SwiftPM 资源 bundle 一起放入 App。修改文案后运行相关语言的深浅色快照，避免英文长文本被截断。快照默认英语，可用 `--language` 指定，示例规则名称保持固定以便跨语言对比。
 
 开发规范、安全约束、提交格式、版本号规则与发布流程见 [AGENTS.md](AGENTS.md)，变更记录见 [CHANGELOG.md](CHANGELOG.md)。推送 `vX.Y.Z` tag 后，GitHub Actions 会构建 universal DMG 并发布到 Releases。
 

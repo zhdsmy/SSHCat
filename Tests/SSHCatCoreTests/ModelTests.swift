@@ -125,7 +125,7 @@ private func sample() -> ForwardRule {
     }
 
     @Test func failureHints() {
-        #expect(SSHFailure.hint(for: "Host key verification failed.")?.contains("终端") == true)
+        #expect(SSHFailure.hint(for: "Host key verification failed.") == L10n.core("failure.host_key_hint"))
         #expect(SSHFailure.hint(for: "app@devbox: Permission denied (publickey).")?.contains("ssh-agent") == true)
         #expect(SSHFailure.hint(for: "connect to host devbox port 22: Connection refused") == nil)
     }

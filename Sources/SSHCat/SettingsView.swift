@@ -14,6 +14,7 @@ struct SettingsView: View {
     @ViewState private var path: String = ""
     @ViewState private var pathError: String?
     @ViewState private var notes = true
+    @ViewState private var language: AppLanguage = .system
     @ViewState private var launchAtLogin = false
     @ViewState private var loginError: String?
     @ViewState private var update: UpdateStatus?
@@ -28,70 +29,80 @@ struct SettingsView: View {
         Form {
             Section("SSH") {
                 HStack {
-                    TextField("自定义路径", text: $path, prompt: Text("留空使用 /usr/bin/ssh"))
+                    TextField(L10n.text("settings.custom_path"), text: $path, prompt: Text(L10n.text("settings.path_default")))
                         .font(.system(.body, design: .monospaced))
                         .onSubmit(applyPath)
-                    Button("应用", action: applyPath)
+                    Button(L10n.text("action.apply"), action: applyPath)
                         .disabled(trimmedPath == (settings.customBinaryPath ?? ""))
                 }
                 if let pathError {
                     Text(pathError).font(.caption).foregroundStyle(.red)
                 }
-                LabeledContent("当前使用") {
-                    Text(displayedBinaryPath ?? "找不到可执行的 ssh")
+                LabeledContent(L10n.text("settings.current_binary")) {
+                    Text(displayedBinaryPath ?? L10n.text("settings.binary_missing"))
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                         .help(displayedBinaryPath ?? "")
                 }
-                LabeledContent("版本") {
+                LabeledContent(L10n.text("settings.version")) {
                     Text(displayedSSHVersion ?? "—").textSelection(.enabled)
                 }
-                Text("从 Finder 打开时 PATH 里没有 Homebrew，要用其他 ssh 需要写绝对路径。")
+                Text(L10n.text("settings.path_hint"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("通用") {
-                Toggle("失败和重连时通知", isOn: $notes)
-                Toggle("登录时启动", isOn: $launchAtLogin)
+            Section(L10n.text("settings.general")) {
+                Picker(L10n.text("language.label"), selection: $language) {
+                    ForEach(AppLanguage.allCases, id: \.self) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                Text(L10n.text("language.restart_hint"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(L10n.text("settings.notifications"), isOn: $notes)
+                Toggle(L10n.text("settings.login"), isOn: $launchAtLogin)
                 if let loginError {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
-                Text("登录项需要从“应用程序”里的 SSHCat.app 打开才会生效。")
+                Text(L10n.text("settings.login_hint"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("SSHCat 更新") {
-                LabeledContent("当前版本") {
+            Section(L10n.text("settings.updates")) {
+                LabeledContent(L10n.text("settings.current_version")) {
                     Text(appVersion).font(.system(.body, design: .monospaced))
                 }
-                Link("打开 GitHub 下载页", destination: UpdateCheck.releasesPage)
+                Link(L10n.text("settings.download"), destination: UpdateCheck.releasesPage)
                 HStack {
-                    Button("检查更新") { Task { await checkForUpdate() } }
+                    Button(L10n.text("settings.check_updates")) { Task { await checkForUpdate() } }
                         .disabled(snapshotMode || update == .checking)
                     switch update {
-                    case .checking?: ProgressView("正在检查…").controlSize(.small)
-                    case .upToDate?: Text("已是最新版本").foregroundStyle(.secondary)
-                    case .available(let version)?: Text("发现新版本：\(version)")
+                    case .checking?: ProgressView(L10n.text("settings.checking")).controlSize(.small)
+                    case .upToDate?: Text(L10n.text("settings.up_to_date")).foregroundStyle(.secondary)
+                    case .available(let version)?: Text(L10n.text("settings.update_available", version))
                     case .failed(let message)?:
-                        Text("检查失败：\(message)").foregroundStyle(.red).lineLimit(2).help(message)
-                    case nil: Text("尚未检查").foregroundStyle(.secondary)
+                        Text(L10n.text("settings.check_failed", message)).foregroundStyle(.red).lineLimit(2).help(message)
+                    case nil: Text(L10n.text("settings.unchecked")).foregroundStyle(.secondary)
                     }
                 }
-                Text("仅在点击时访问 GitHub 查询最新版本。")
+                Text(L10n.text("settings.update_hint"))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 520, height: 600)
+        .frame(width: 520, height: 680)
         .onAppear {
             load()
             if !snapshotMode { manager.refreshBinary() }
         }
         .onChange(of: notes) { newValue in
             settings.notificationsEnabled = newValue
+        }
+        .onChange(of: language) { newValue in
+            settings.language = newValue
         }
         .onChange(of: launchAtLogin) { newValue in
             setLaunchAtLogin(newValue)
@@ -106,6 +117,7 @@ struct SettingsView: View {
         path = settings.customBinaryPath ?? ""
         pathError = nil
         notes = settings.notificationsEnabled
+        language = settings.language
         if !snapshotMode { launchAtLogin = SMAppService.mainApp.status == .enabled }
     }
 
@@ -141,7 +153,7 @@ struct SettingsView: View {
     private func applyPath() {
         let value = trimmedPath
         if !value.isEmpty, !FileManager.default.isExecutableFile(atPath: value) {
-            pathError = "\(value) 不存在或不可执行，没有保存。"
+            pathError = L10n.text("settings.path_invalid", value)
             return
         }
         pathError = nil

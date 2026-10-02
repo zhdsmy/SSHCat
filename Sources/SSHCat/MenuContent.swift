@@ -12,17 +12,17 @@ struct MenuContent: View {
             HStack {
                 Text("SSHCat").font(.headline)
                 Spacer()
-                Text("\(manager.runners.filter { $0.state == .running }.count) / \(manager.runners.count) 运行中")
+                Text(L10n.text("menu.running_count", manager.runners.filter { $0.state == .running }.count, manager.runners.count))
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
             if manager.binaryPath == nil {
-                Text("找不到 ssh，请在设置中指定路径。")
+                Text(L10n.text("menu.binary_missing"))
                     .font(.caption).foregroundStyle(.red).padding(.horizontal, 12).padding(.bottom, 8)
             }
             if manager.loadError != nil || manager.saveError != nil {
                 Button { show(nil) } label: {
-                    Label("配置读写失败，打开管理窗口查看", systemImage: "exclamationmark.triangle")
+                    Label(L10n.text("menu.storage_failed"), systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -36,7 +36,7 @@ struct MenuContent: View {
             Divider().padding(.vertical, 8)
             VStack(spacing: 10) {
                 HStack {
-                    Button("管理…") { show(nil) }
+                    Button(L10n.text("action.manage")) { show(nil) }
                     NewRuleMenu { kind in
                         navigation.add(kind, using: manager)
                         show(nil)
@@ -48,12 +48,12 @@ struct MenuContent: View {
                     Button {
                         navigation.showingGuide = true
                         show(nil)
-                    } label: { Label("使用说明", systemImage: "questionmark.circle") }
+                    } label: { Label(L10n.text("action.guide"), systemImage: "questionmark.circle") }
                     .buttonStyle(.link)
                     Spacer()
                     SettingsButton()
-                    Button("退出") { NSApp.terminate(nil) }
-                        .help("退出 SSHCat 并停止所有由它启动的转发")
+                    Button(L10n.text("action.quit")) { NSApp.terminate(nil) }
+                        .help(L10n.text("action.quit_help"))
                 }
             }
             .padding(.horizontal, 12).padding(.bottom, 12)
@@ -64,7 +64,7 @@ struct MenuContent: View {
     private var rulesContent: some View {
         VStack(alignment: .leading, spacing: 4) {
             if manager.runners.isEmpty {
-                Text("还没有转发。新建本地、远程转发或 SOCKS 代理，填写 SSH 主机后即可连接。")
+                Text(L10n.text("menu.empty"))
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true).padding(12)
             }
@@ -94,7 +94,7 @@ private struct MenuRow: View {
                 Button(runner.rule.name, action: onOpen)
                     .buttonStyle(.plain).font(.body.weight(.medium))
                     .lineLimit(1).help(runner.rule.name)
-                Text(incomplete ? "配置未完成，点名称继续编辑" : runner.rule.destination)
+                Text(incomplete ? L10n.text("menu.incomplete") : runner.rule.destination)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     .help(runner.rule.destination)
                 if !incomplete {
@@ -103,21 +103,21 @@ private struct MenuRow: View {
                         .help(runner.state.reason ?? runner.state.label)
                 }
                 if hasDraft {
-                    Text("有未保存的修改").font(.caption).foregroundStyle(.orange)
+                    Text(L10n.text("menu.unsaved")).font(.caption).foregroundStyle(.orange)
                 }
             }
             Spacer(minLength: 4)
             if let endpoint = localEndpoints {
-                CopyButton(text: endpoint, label: "复制本地地址", iconOnly: true)
+                CopyButton(text: endpoint, label: L10n.text("action.copy_address"), iconOnly: true)
                     .buttonStyle(.borderless)
             }
-            Toggle("运行 \(runner.rule.name)", isOn: Binding(
+            Toggle(L10n.text("menu.run_rule", runner.rule.name), isOn: Binding(
                 get: { runner.state.isActive },
                 set: { manager.setActive($0, id: runner.id) }
             ))
             .labelsHidden().toggleStyle(.switch).controlSize(.small)
             .disabled((incomplete || hasDraft) && !runner.state.isActive)
-            .help(hasDraft && !runner.state.isActive ? "先在管理窗口保存修改" : "启动或停止这条转发")
+            .help(hasDraft && !runner.state.isActive ? L10n.text("menu.save_first") : L10n.text("menu.toggle_help"))
         }
         .padding(.horizontal, 12).padding(.vertical, 5)
     }

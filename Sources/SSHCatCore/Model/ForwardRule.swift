@@ -7,9 +7,17 @@ public enum ForwardKind: String, Codable, Sendable, CaseIterable, Equatable {
 
     public var label: String {
         switch self {
-        case .local: return "本地"
-        case .remote: return "远程"
-        case .dynamic: return "动态"
+        case .local: return L10n.core("forward.kind.local")
+        case .remote: return L10n.core("forward.kind.remote")
+        case .dynamic: return L10n.core("forward.kind.dynamic")
+        }
+    }
+
+    public var defaultName: String {
+        switch self {
+        case .local: return L10n.core("forward.default.local")
+        case .remote: return L10n.core("forward.default.remote")
+        case .dynamic: return L10n.core("forward.default.dynamic")
         }
     }
 
@@ -36,15 +44,15 @@ public enum ForwardIssue: Error, Equatable, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .emptyName: return "名称不能为空"
-        case .invalidHost: return "主机不能为空，不能含空白、@ 或冒号，也不能以 - 开头"
-        case .invalidUser: return "用户名不能含空白或 @，也不能以 - 开头"
-        case .invalidPort: return "端口应为 1–65535"
-        case .invalidIdentity: return "密钥必须是绝对路径，不能含换行"
-        case .noForwards: return "至少需要一条转发"
-        case .invalidBind(let s): return "绑定地址无效：\(s)"
-        case .invalidTarget(let s): return "目标地址无效：\(s)"
-        case .invalidForwardPort(let s): return "转发端口无效：\(s)（应为 1–65535）"
+        case .emptyName: return L10n.core("validation.name_empty")
+        case .invalidHost: return L10n.core("validation.host_invalid")
+        case .invalidUser: return L10n.core("validation.user_invalid")
+        case .invalidPort: return L10n.core("validation.port_invalid")
+        case .invalidIdentity: return L10n.core("validation.identity_invalid")
+        case .noForwards: return L10n.core("validation.forwards_empty")
+        case .invalidBind(let s): return L10n.core("validation.bind_invalid", s)
+        case .invalidTarget(let s): return L10n.core("validation.target_invalid", s)
+        case .invalidForwardPort(let s): return L10n.core("validation.forward_port_invalid", s)
         }
     }
 }
@@ -96,7 +104,7 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
     public var summary: String {
         switch kind {
         case .local: return "\(bindAddress):\(bindPort) → \(targetHost):\(targetPort)"
-        case .remote: return "远端 \(bindAddress):\(bindPort) ← \(targetHost):\(targetPort)"
+        case .remote: return L10n.core("forward.remote_summary", bindAddress, bindPort, targetHost, targetPort)
         case .dynamic: return "SOCKS \(bindAddress):\(bindPort)"
         }
     }
@@ -203,7 +211,7 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
     public func duplicate() -> ForwardRule {
         var copy = self
         copy.id = UUID()
-        copy.name += " 副本"
+        copy.name = L10n.core("rule.copy_name", name)
         copy.autoStart = false
         copy.forwards = forwards.map { forward in
             var copy = forward
@@ -265,7 +273,7 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
     }
 
     public func commandLine(executable: String) -> String {
-        guard let args = try? arguments() else { return "配置还不完整，无法生成命令" }
+        guard let args = try? arguments() else { return L10n.core("rule.command_unavailable") }
         return ShellQuote.join([executable] + args)
     }
 }
@@ -336,16 +344,16 @@ public enum SSHFailure {
     public static func hint(for reason: String) -> String? {
         let text = reason.lowercased()
         if text.contains("host key verification failed") {
-            return "主机指纹未知或已变化。先在终端里执行一次 ssh 连接这台主机，确认指纹后再打开规则。App 不会替你确认。"
+            return L10n.core("failure.host_key_hint")
         }
         if text.contains("permission denied") {
-            return "认证失败。检查密钥路径，或确认 ssh-agent 里有对应的密钥。App 不会弹出密码框。"
+            return L10n.core("failure.authentication_hint")
         }
         if text.contains("address already in use") {
-            return "本机端口已被占用。换一个绑定端口，或先停掉占用它的程序。"
+            return L10n.core("failure.port_hint")
         }
         if text.contains("could not resolve hostname") {
-            return "解析不到主机名。检查主机名，或确认它在 ~/.ssh/config 里。"
+            return L10n.core("failure.host_hint")
         }
         return nil
     }

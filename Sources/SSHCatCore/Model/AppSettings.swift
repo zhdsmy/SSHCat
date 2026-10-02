@@ -8,6 +8,7 @@ public struct AppSettings: @unchecked Sendable {
     public enum Key {
         public static let customBinaryPath = "customBinaryPath"
         public static let notificationsEnabled = "notificationsEnabled"
+        public static let language = "language"
     }
 
     private let defaults: UserDefaults
@@ -27,6 +28,15 @@ public struct AppSettings: @unchecked Sendable {
             } else {
                 defaults.removeObject(forKey: Key.customBinaryPath)
             }
+        }
+    }
+
+    /// Existing installations follow the system until the user chooses a language.
+    public var language: AppLanguage {
+        get { defaults.string(forKey: Key.language).flatMap(AppLanguage.init(rawValue:)) ?? .system }
+        nonmutating set {
+            if newValue == .system { defaults.removeObject(forKey: Key.language) }
+            else { defaults.set(newValue.rawValue, forKey: Key.language) }
         }
     }
 

@@ -79,7 +79,7 @@ private func isFailed(_ state: RunState) -> Bool {
         runner.onNotify = { _, body in notes.append(body) }
         runner.start()
         #expect(await waitUntil { isFailed(runner.state) })
-        #expect(notes.first?.contains("确认指纹") == true)
+        #expect(notes.first?.contains(L10n.core("failure.host_key_hint")) == true)
     }
 
     @Test func drainsOutputLargerThanPipeBuffer() async {
@@ -123,7 +123,9 @@ private func isFailed(_ state: RunState) -> Bool {
         runner.onNotify = { _, body in notes.append(body) }
         runner.start()
         #expect(await waitUntil { isFailed(runner.state) })
-        #expect(notes.first?.hasPrefix("转发失败") == true)
+        #expect(notes.first == L10n.core("notification.failed",
+                                      "bind [127.0.0.1]:8080: Address already in use",
+                                      "\n" + L10n.core("failure.port_hint")))
         if case .reconnecting = runner.state {
             Issue.record("bind failure should not reconnect")
         }
@@ -167,7 +169,7 @@ private func isFailed(_ state: RunState) -> Bool {
         var edited = runner.rule
         edited.host = "otherbox"
         runner.update(rule: edited)
-        #expect(runner.log.contains { $0.contains("配置已修改") })
+        #expect(runner.log.contains { $0.contains(L10n.core("runtime.configuration_changed")) })
         #expect(await waitUntil { runner.state == .running })
         runner.stop()
     }
