@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum ForwardKind: String, Codable, Sendable, CaseIterable, Equatable {
     case local
@@ -96,22 +97,25 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
     /// Local or dynamic listen endpoint the user can copy. Remote forwards listen on the server.
     public var localEndpoint: String? {
         switch kind {
-        case .local, .dynamic: return "\(bindAddress):\(bindPort)"
+        case .local, .dynamic: return "\(SSHToken.forwardAddress(bindAddress)):\(bindPort)"
         case .remote: return nil
         }
     }
 
     public var summary: String {
         switch kind {
-        case .local: return "\(bindAddress):\(bindPort) → \(targetHost):\(targetPort)"
-        case .remote: return L10n.core("forward.remote_summary", bindAddress, bindPort, targetHost, targetPort)
-        case .dynamic: return "SOCKS \(bindAddress):\(bindPort)"
+        case .local:
+            return "\(SSHToken.forwardAddress(bindAddress)):\(bindPort) → \(SSHToken.forwardAddress(targetHost)):\(targetPort)"
+        case .remote:
+            return L10n.core("forward.remote_summary", SSHToken.forwardAddress(bindAddress), bindPort,
+                             SSHToken.forwardAddress(targetHost), targetPort)
+        case .dynamic: return "SOCKS \(SSHToken.forwardAddress(bindAddress)):\(bindPort)"
         }
     }
 
     /// Remote bind outside loopback only works when sshd has GatewayPorts enabled.
     public var needsGatewayPorts: Bool {
-        kind == .remote && !Self.loopback.contains(bindAddress)
+        kind == .remote && !SSHToken.isLoopback(bindAddress)
     }
 
     public func validate() throws {
@@ -128,9 +132,9 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
         try validate()
         switch kind {
         case .local, .remote:
-            return [kind.flag, "\(bindAddress):\(bindPort):\(targetHost):\(targetPort)"]
+            return [kind.flag, "\(SSHToken.forwardAddress(bindAddress)):\(bindPort):\(SSHToken.forwardAddress(targetHost)):\(targetPort)"]
         case .dynamic:
-            return [kind.flag, "\(bindAddress):\(bindPort)"]
+            return [kind.flag, "\(SSHToken.forwardAddress(bindAddress)):\(bindPort)"]
         }
     }
 
@@ -138,17 +142,8 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
     /// the server, so they never clash with local ones here.
     public func clashes(with other: PortForward) -> Bool {
         guard localEndpoint != nil, other.localEndpoint != nil, bindPort == other.bindPort else { return false }
-        let a = Self.normalized(bindAddress), b = Self.normalized(other.bindAddress)
-        return a == b || Self.wildcard.contains(a) || Self.wildcard.contains(b)
+        return SSHToken.bindAddressesClash(bindAddress, other.bindAddress)
     }
-
-    private static func normalized(_ address: String) -> String {
-        let s = address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return s == "localhost" ? "127.0.0.1" : s
-    }
-
-    private static let loopback: Set<String> = ["127.0.0.1", "localhost"]
-    private static let wildcard: Set<String> = ["0.0.0.0", "*"]
 }
 
 /// One long-running `ssh -N`: a destination plus any mix of `-L`, `-R`, and `-D`.
@@ -204,7 +199,8 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
     public var destination: String {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let user = user.trimmingCharacters(in: .whitespacesAndNewlines)
-        return user.isEmpty ? host : "\(user)@\(host)"
+        let destinationHost = SSHToken.sshDestinationHost(host)
+        return user.isEmpty ? destinationHost : "\(user)@\(destinationHost)"
     }
 
     /// A copy must not inherit launch-on-open or any IDs used by the list and editor.
@@ -279,11 +275,13 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
 }
 
 enum SSHToken {
-    /// Host alias or hostname. Reject `@` so user and host are not both baked into one field,
-    /// and `:` so the value cannot be read as a port. Reject leading `-` so it cannot be an option.
+    /// Host aliases cannot contain a port separator. Colons are accepted only in valid IPv6 literals.
     static func isHost(_ raw: String) -> Bool {
+        guard !containsControl(raw) else { return false }
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !s.isEmpty && isPlain(s) && !s.contains("@") && !s.contains(":")
+        if isIPv6(s) { return true }
+        return !s.isEmpty && isPlain(s) && !s.contains("@") && !s.contains(":") &&
+            !s.contains("%") && !s.contains("[") && !s.contains("]")
     }
 
     /// Empty is valid: ssh config supplies User.
@@ -305,14 +303,135 @@ enum SSHToken {
         return s.hasPrefix("/")
     }
 
-    /// Bind or target host. IPv6 is rejected: a colon would make `-L a:b:c:d` ambiguous.
+    /// Bind or target host. IPv6 is bracketed only when serialized into ssh's forwarding syntax.
     static func isAddress(_ raw: String) -> Bool {
+        guard !containsControl(raw) else { return false }
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !s.isEmpty && isPlain(s) && !s.contains(":") && !s.contains("@")
+        if isIPv6(s) { return true }
+        return !s.isEmpty && isPlain(s) && !s.contains("@") && !s.contains(":") &&
+            !s.contains("%") && !s.contains("[") && !s.contains("]")
+    }
+
+    static func forwardAddress(_ raw: String) -> String {
+        guard let address = ipv6Literal(raw) else { return raw.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return "[\(address)]"
+    }
+
+    static func sshDestinationHost(_ raw: String) -> String {
+        ipv6Literal(raw) ?? raw
+    }
+
+    static func isLoopback(_ raw: String) -> Bool {
+        bindIdentity(raw).isLoopback
+    }
+
+    static func bindAddressesClash(_ lhs: String, _ rhs: String) -> Bool {
+        let a = bindIdentity(lhs), b = bindIdentity(rhs)
+        if a == .any || b == .any || a == b { return true }
+
+        if a == .localhost { return b.isLoopback || b.isWildcard }
+        if b == .localhost { return a.isLoopback || a.isWildcard }
+
+        switch (a, b) {
+        case (.ipv4(let left), .ipv4(let right)):
+            return left == right || left.allSatisfy { $0 == 0 } || right.allSatisfy { $0 == 0 }
+        case (.ipv6(let left, let leftScope), .ipv6(let right, let rightScope)):
+            let sameScope = leftScope == rightScope || leftScope == nil || rightScope == nil
+            let leftWildcard = left.allSatisfy { $0 == 0 }
+            let rightWildcard = right.allSatisfy { $0 == 0 }
+            return left == right && sameScope || leftWildcard || rightWildcard
+        case (.ipv4(let address), .name), (.name, .ipv4(let address)):
+            return address.allSatisfy { $0 == 0 }
+        case (.ipv6(let address, _), .name), (.name, .ipv6(let address, _)):
+            return address.allSatisfy { $0 == 0 }
+        default:
+            return false
+        }
+    }
+
+    private enum BindIdentity: Equatable {
+        case any
+        case localhost
+        case ipv4([UInt8])
+        case ipv6([UInt8], String?)
+        case name(String)
+
+        var isLoopback: Bool {
+            switch self {
+            case .localhost: return true
+            case .ipv4(let bytes): return bytes.first == 127
+            case .ipv6(let bytes, _): return bytes.dropLast().allSatisfy { $0 == 0 } && bytes.last == 1
+            default: return false
+            }
+        }
+
+        var isWildcard: Bool {
+            switch self {
+            case .any: return true
+            case .ipv4(let bytes), .ipv6(let bytes, _): return bytes.allSatisfy { $0 == 0 }
+            default: return false
+            }
+        }
+    }
+
+    private static func bindIdentity(_ raw: String) -> BindIdentity {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value == "*" { return .any }
+        if value == "localhost" { return .localhost }
+        if let literal = ipv6Literal(value), let parsed = parsedIPv6(literal) {
+            return .ipv6(parsed.bytes, parsed.scope)
+        }
+        if let bytes = parsedIPv4(value) { return .ipv4(bytes) }
+        return .name(value)
+    }
+
+    private static func isIPv6(_ raw: String) -> Bool {
+        ipv6Literal(raw) != nil
+    }
+
+    private static func ipv6Literal(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let literal: String
+        if value.hasPrefix("[") || value.hasSuffix("]") {
+            guard value.hasPrefix("["), value.hasSuffix("]") else { return nil }
+            literal = String(value.dropFirst().dropLast())
+        } else {
+            guard !value.contains("[") && !value.contains("]") else { return nil }
+            literal = value
+        }
+        return parsedIPv6(literal) == nil ? nil : literal
+    }
+
+    private static func parsedIPv6(_ literal: String) -> (bytes: [UInt8], scope: String?)? {
+        let parts = literal.split(separator: "%", omittingEmptySubsequences: false)
+        guard parts.count == 1 || parts.count == 2 else { return nil }
+        let address = String(parts[0])
+        let scope = parts.count == 2 ? String(parts[1]) : nil
+        if let scope {
+            let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+            let leading = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+            guard let first = scope.unicodeScalars.first, leading.contains(first),
+                  scope.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        }
+        var parsed = in6_addr()
+        guard address.withCString({ inet_pton(AF_INET6, $0, &parsed) }) == 1 else { return nil }
+        let bytes = withUnsafeBytes(of: &parsed) { Array($0) }
+        return (bytes, scope)
+    }
+
+    private static func parsedIPv4(_ literal: String) -> [UInt8]? {
+        var parsed = in_addr()
+        guard literal.withCString({ inet_pton(AF_INET, $0, &parsed) }) == 1 else { return nil }
+        return withUnsafeBytes(of: &parsed) { Array($0) }
     }
 
     private static func isPlain(_ s: String) -> Bool {
-        !s.hasPrefix("-") && !s.contains(where: { $0.isWhitespace })
+        !s.hasPrefix("-") && !s.contains(where: { $0.isWhitespace }) && !containsControl(s)
+    }
+
+    private static func containsControl(_ value: String) -> Bool {
+        let controls = CharacterSet.controlCharacters
+        return value.unicodeScalars.contains { controls.contains($0) }
     }
 }
 

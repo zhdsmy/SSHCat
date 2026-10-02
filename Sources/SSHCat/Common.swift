@@ -2,6 +2,58 @@ import AppKit
 import SwiftUI
 import SSHCatCore
 
+enum RuleFilter: String, CaseIterable {
+    case all, running, failed
+    var label: String {
+        switch self {
+        case .all: return L10n.text("filter.all")
+        case .running: return L10n.text("state.running")
+        case .failed: return L10n.text("filter.failed")
+        }
+    }
+    func includes(_ state: RunState) -> Bool {
+        switch self {
+        case .all: return true
+        case .running: return state == .running
+        case .failed:
+            if case .failed = state { return true }
+            return false
+        }
+    }
+}
+
+struct RuleFilterPicker: View {
+    @EnvironmentObject var navigation: Navigation
+    var body: some View {
+        Picker(L10n.text("filter.label"), selection: $navigation.filter) {
+            ForEach(RuleFilter.allCases, id: \.self) { filter in Text(filter.label).tag(filter) }
+        }.pickerStyle(.segmented).labelsHidden()
+    }
+}
+
+struct FieldError: View {
+    let issue: ForwardIssue?
+    var body: some View {
+        if let issue {
+            Text(issue.localizedDescription).font(.caption).foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+@MainActor
+enum QuitConfirmation {
+    static func alert(ruleNames: [String]) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = L10n.text("quit.unsaved_title")
+        alert.informativeText = L10n.text("quit.unsaved_detail", ruleNames.joined(separator: "\n"))
+        alert.addButton(withTitle: L10n.text("quit.keep_editing"))
+        alert.addButton(withTitle: L10n.text("quit.discard"))
+        return alert
+    }
+}
+
 extension RunState {
     /// One line for lists. The countdown and full reason live in `StateDetail`, which can refresh.
     var label: String {

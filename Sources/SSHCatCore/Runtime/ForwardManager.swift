@@ -112,13 +112,23 @@ public final class ForwardManager: ObservableObject {
 
     /// Local listeners in `rule` that another saved rule, or another forward in the same rule, also binds.
     public func clashingEndpoints(in rule: ForwardRule) -> [String] {
-        let others = runners.filter { $0.id != rule.id }.flatMap(\.rule.forwards)
-        var clashes: [String] = []
+        listenerConflicts(in: rule).map(\.endpoint)
+    }
+
+    public struct ListenerConflict {
+        public var endpoint: String
+        public var ruleNames: [String]
+    }
+
+    public func listenerConflicts(in rule: ForwardRule) -> [ListenerConflict] {
+        var clashes: [ListenerConflict] = []
         for (index, forward) in rule.forwards.enumerated() {
             let siblings = rule.forwards.enumerated().filter { $0.offset != index }.map(\.element)
-            guard (others + siblings).contains(where: forward.clashes(with:)),
-                  let endpoint = forward.localEndpoint, !clashes.contains(endpoint) else { continue }
-            clashes.append(endpoint)
+            var names = runners.filter { $0.id != rule.id && $0.rule.forwards.contains(where: forward.clashes(with:)) }.map(\.rule.name)
+            if siblings.contains(where: forward.clashes(with:)) { names.append(rule.name) }
+            guard !names.isEmpty, let endpoint = forward.localEndpoint,
+                  !clashes.contains(where: { $0.endpoint == endpoint }) else { continue }
+            clashes.append(ListenerConflict(endpoint: endpoint, ruleNames: names))
         }
         return clashes
     }
@@ -172,6 +182,31 @@ public final class ForwardManager: ObservableObject {
     public func setActive(_ active: Bool, id: UUID) {
         guard let runner = runner(id: id) else { return }
         if active { runner.start() } else { runner.stop() }
+    }
+
+    @discardableResult
+    public func saveAndStart(_ rule: ForwardRule) -> Bool {
+        guard (try? rule.validate()) != nil, update(rule) else { return false }
+        runner(id: rule.id)?.start()
+        return true
+    }
+
+    public func retry(id: UUID) {
+        guard let runner = runner(id: id) else { return }
+        if runner.state.isActive { runner.restart(reason: L10n.core("runtime.manual_retry")) }
+        else { runner.start() }
+    }
+
+    @discardableResult
+    public func importRules(_ incoming: [ForwardRule], duplicates: RuleArchive.Duplicates) -> Bool {
+        guard ensureRulesLoaded() else { return false }
+        do { for rule in incoming { try rule.validate() } }
+        catch { saveError = error.localizedDescription; return false }
+        let added = RuleArchive.prepare(incoming, existing: rules, duplicates: duplicates)
+        guard !added.isEmpty else { return true }
+        guard persist(rules + added) else { return false }
+        for rule in added { attach(rule) }
+        return true
     }
 
     /// Wake / network change: restart every session the supervisor is keeping alive.

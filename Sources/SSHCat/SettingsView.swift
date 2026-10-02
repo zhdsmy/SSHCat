@@ -2,6 +2,7 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 import SSHCatCore
+@preconcurrency import UserNotifications
 
 enum UpdateStatus: Equatable {
     case checking, upToDate, available(String), failed(String)
@@ -18,10 +19,16 @@ struct SettingsView: View {
     @ViewState private var launchAtLogin = false
     @ViewState private var loginError: String?
     @ViewState private var update: UpdateStatus?
+    @ViewState private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @ViewState private var loginStatus: SMAppService.Status = .notRegistered
 
-    init(settings: AppSettings = AppSettings(), snapshotMode: Bool = false, update: UpdateStatus? = nil) {
+    init(settings: AppSettings = AppSettings(), snapshotMode: Bool = false, update: UpdateStatus? = nil,
+         notificationStatus: UNAuthorizationStatus = .notDetermined, loginStatus: SMAppService.Status = .notRegistered) {
         _settings = State(initialValue: settings)
         _update = State(initialValue: update)
+        _notificationStatus = State(initialValue: notificationStatus)
+        _loginStatus = State(initialValue: loginStatus)
+        _launchAtLogin = State(initialValue: loginStatus == .enabled || loginStatus == .requiresApproval)
         self.snapshotMode = snapshotMode
     }
 
@@ -62,7 +69,27 @@ struct SettingsView: View {
                 Text(L10n.text("language.restart_hint"))
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.text("settings.notifications"), isOn: $notes)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(notificationPermissionText).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L10n.text("settings.system_settings")) {
+                        guard !snapshotMode else { return }
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                    }.buttonStyle(.link)
+                }
+                if notificationStatus == .notDetermined {
+                    Button(L10n.text("settings.allow_notifications")) { Task { await requestNotifications() } }
+                        .disabled(snapshotMode || !notes)
+                }
                 Toggle(L10n.text("settings.login"), isOn: $launchAtLogin)
+                if loginStatus == .requiresApproval {
+                    Text(L10n.text("settings.login_pending")).font(.caption).foregroundStyle(.orange)
+                    Button(L10n.text("settings.system_settings")) {
+                        if !snapshotMode { SMAppService.openSystemSettingsLoginItems() }
+                    }.buttonStyle(.link)
+                } else if loginStatus == .notFound {
+                    Text(L10n.text("settings.login_unavailable")).font(.caption).foregroundStyle(.secondary)
+                }
                 if let loginError {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
@@ -101,6 +128,9 @@ struct SettingsView: View {
         .onChange(of: notes) { newValue in
             settings.notificationsEnabled = newValue
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+        }
         .onChange(of: language) { newValue in
             settings.language = newValue
         }
@@ -118,7 +148,31 @@ struct SettingsView: View {
         pathError = nil
         notes = settings.notificationsEnabled
         language = settings.language
-        if !snapshotMode { launchAtLogin = SMAppService.mainApp.status == .enabled }
+        refreshPermissions()
+    }
+
+    private var notificationPermissionText: String {
+        switch notificationStatus {
+        case .authorized, .provisional, .ephemeral: return L10n.text("settings.notifications_allowed")
+        case .denied: return L10n.text("settings.notifications_denied")
+        case .notDetermined: return L10n.text("settings.notifications_pending")
+        @unknown default: return L10n.text("settings.notifications_pending")
+        }
+    }
+
+    private func refreshPermissions() {
+        guard !snapshotMode else { return }
+        loginStatus = SMAppService.mainApp.status
+        launchAtLogin = loginStatus == .enabled || loginStatus == .requiresApproval
+        Task {
+            notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        }
+    }
+
+    private func requestNotifications() async {
+        guard !snapshotMode else { return }
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        refreshPermissions()
     }
 
     private func checkForUpdate() async {
@@ -133,7 +187,8 @@ struct SettingsView: View {
 
     private func setLaunchAtLogin(_ enabled: Bool) {
         guard !snapshotMode else { return }
-        let currentlyEnabled = SMAppService.mainApp.status == .enabled
+        let status = SMAppService.mainApp.status
+        let currentlyEnabled = status == .enabled || status == .requiresApproval
         guard enabled != currentlyEnabled else { return }
         do {
             if enabled {
@@ -142,6 +197,7 @@ struct SettingsView: View {
                 try SMAppService.mainApp.unregister()
             }
             loginError = nil
+            refreshPermissions()
         } catch {
             loginError = error.localizedDescription
             launchAtLogin = currentlyEnabled

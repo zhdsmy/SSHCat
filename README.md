@@ -61,7 +61,7 @@ Safe UI snapshots:
 
 Snapshots are available only in debug builds. They use temporary rules, isolated preferences, and `/bin/sh` as fake SSH. They do not read real rules or `~/.ssh/config`, change login items, or establish real SSH connections. Images are written to `build/snapshots-<language>[-dark]/`; English is the default.
 
-The scenes cover normal and empty states, failures, reconnection, unsaved drafts, search, long names, many rules, update notifications, and unsupported data versions. Scrollable pages produce additional `-scroll-N` images. Snapshots exclude title bars, toolbars, and actual interaction tests. Switches in unfocused windows may look gray. Sample rule names stay the same across languages for comparison.
+The scenes also cover field errors, state filters, the host picker, import preview, quit confirmation, and system permission states. The isolated harness checks actual port text editing, draft restoration after switching rules, and both quit-confirmation outcomes. Scrollable pages produce additional `-scroll-N` images. Snapshots exclude title bars and toolbars and do not replace full interaction testing of native file dialogs or System Settings. Switches in unfocused windows may look gray. Sample rule names stay the same across languages for comparison.
 
 For development:
 
@@ -74,17 +74,23 @@ A plain `swift build` executable is not an app bundle and may show a Dock icon. 
 ## Create a forward
 
 1. Choose **New Forward** in the menu bar and select a local forward, remote forward, or SOCKS proxy. You can also use the management window's add menu or the built-in guide.
-2. Enter a `Host` alias from `~/.ssh/config` or a hostname. Leave user, port, and key blank to use that host's SSH configuration, including `ProxyJump`.
+2. Enter a `Host` alias from `~/.ssh/config`, a hostname, or an IP address. The host picker supports search and refresh, including aliases in `Include` files. Leave user, port, and key blank to use that host's SSH configuration, including `ProxyJump`.
 3. Set a port (`-p`) or an identity file (`-i`, with `IdentitiesOnly=yes`) only when you need an override.
 4. Add one or more forwards:
    - **Local:** a local listening address and port forward to a destination reachable from the SSH server.
    - **Remote:** an address and port on the SSH server forward to a destination reachable from your Mac. Listening on a non-loopback address requires `GatewayPorts` on the server.
    - **Dynamic:** a local SOCKS proxy.
-5. Save and turn on the rule. Turning it off releases its listeners. Closing the management window leaves forwards running; quitting SSHCat stops the processes it owns.
+5. Choose **Save and Connect**, or save and turn on the rule. Turning it off releases its listeners. Closing the management window leaves forwards running; quitting SSHCat stops the processes it owns.
 
-Search rules by name, host, or port. **Create Copy** in the **…** menu copies the saved configuration with new IDs and automatic startup disabled. Choose another listening port to avoid conflicting with the original rule.
+Search rules by name, host, or port, and filter the menu or sidebar to running or failed rules. The menu shows forwarding endpoints; listener-conflict warnings identify the affected rules. **Create Copy** in the **…** menu copies the saved configuration with new IDs and automatic startup disabled. Choose another listening port to avoid conflicting with the original rule.
 
-Unsaved edits survive switching rules or closing the management window until you quit SSHCat. A stopped rule with unsaved edits cannot be started from the menu or the editor. Changes are applied to an active connection only after they have been saved successfully.
+Unsaved edits, including empty or invalid port text, survive switching rules or closing the management window. Errors appear beside their fields. Whitespace-only edits and equivalent port values do not count as pending changes. Quitting with unsaved changes lets you return to editing or explicitly discard them. Drafts are not persisted across app launches. A stopped rule with pending changes requires saving before starting; **Save and Connect** does both. Changes reach an active connection only after a successful save.
+
+Use **Retry Now** on a failed connection or during a reconnect countdown to try immediately. **Copy First Connection Command** copies a command to run manually in Terminal, using the saved host, port, user, and key. It allows you to verify the host fingerprint and authenticate without starting forwards; SSHCat never runs this interactive command itself.
+
+IPv6 works for SSH hosts and forwarding addresses, with or without brackets: for example, `2001:db8::1` or `[2001:db8::1]`. The app adds brackets in forwarding arguments such as `[::1]:8080:[2001:db8::2]:8080`. Enter the SSH port in its own field. Scoped addresses such as `fe80::1%en0` are also supported. Conflict checks distinguish IPv4 and IPv6 listeners without doing DNS lookups; they cannot predict every hostname alias or listener opened by another app.
+
+Host suggestions expand relative `Include` paths from `~/.ssh`, plus absolute paths, `~/` paths, quoted paths, and globs. Cycles, unreadable files, and non-regular files are skipped; scanning is bounded to 16 include levels, 256 files, and 1 MiB. Suggestions do not evaluate `Host`/`Match` conditions or run `Match exec`; SSH still resolves the actual connection settings.
 
 The menu displays connection states and scrolls when needed. Copy local addresses from the menu or rule details. Expand the equivalent command and connection log for troubleshooting; copy buttons briefly confirm success. **Running** indicates an established SSH session; the destination service and port still need to be available.
 
@@ -101,6 +107,12 @@ ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
 `ControlMaster=no` keeps the connection under the app's ownership, so stopping a rule stops its forward. `ServerAlive*` lets a broken session exit so it can reconnect with backoff. `ExitOnForwardFailure=yes` prevents failed listeners from appearing to work. `ConnectTimeout=10` bounds connection setup, and `LogLevel=VERBOSE` reports authentication progress. SSHCat uses the authentication message to detect a running session, with a delayed fallback for SSH builds that log differently.
 
 The equivalent command can be copied, but SSHCat itself always launches SSH using an argument array, never through a shell.
+
+## Import, export, and system permissions
+
+Use the management toolbar's **Import and Export** menu to export the selected saved rule or all saved rules as v1 JSON. Complete invalid or unfinished rules before exporting. Import accepts up to 8 MB and 1,000 valid rules and shows a preview before writing anything. Rules with an existing ID or identical configuration are duplicates; choose to skip them or import copies. Existing rules are preserved, imported rules receive fresh IDs, and automatic startup is disabled. Import never connects them automatically. Key paths remain local paths; private keys are not included.
+
+Settings shows macOS notification authorization separately from SSHCat's notification switch, with a link to System Settings. Login-item status also shows when macOS approval is pending and provides the appropriate Settings link. Status refreshes when the app becomes active again.
 
 ## Data and privacy
 

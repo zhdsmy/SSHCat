@@ -24,7 +24,7 @@ public enum SecureFile {
         try? Data(contentsOf: url)
     }
 
-    public static func write(_ data: Data, to url: URL) throws {
+    public static func write(_ data: Data, to url: URL, secureDirectory: Bool = true) throws {
         let fm = FileManager.default
         let directory = url.deletingLastPathComponent()
         try fm.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -40,7 +40,7 @@ public enum SecureFile {
                 try fm.moveItem(at: tmp, to: url)
             }
             // createDirectory's mode is masked by umask; set the modes the plan requires explicitly.
-            try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            if secureDirectory { try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             try? fm.removeItem(at: tmp)
@@ -100,11 +100,7 @@ public final class ForwardStore: @unchecked Sendable {
         }
 
         do {
-            let version = try JSONDecoder().decode(Version.self, from: data).version
-            guard version == Self.currentVersion else {
-                throw ForwardStoreError.unsupportedVersion(version)
-            }
-            let rules = try JSONDecoder().decode(FileFormat.self, from: data).rules
+            let rules = try Self.decode(data)
             loadFailure = nil
             return rules
         } catch let error as ForwardStoreError {
@@ -127,8 +123,18 @@ public final class ForwardStore: @unchecked Sendable {
         if let loadFailure {
             throw ForwardStoreError.writeBlocked(loadFailure)
         }
+        try SecureFile.write(Self.encode(rules), to: fileURL)
+    }
+
+    public static func decode(_ data: Data) throws -> [ForwardRule] {
+        let version = try JSONDecoder().decode(Version.self, from: data).version
+        guard version == currentVersion else { throw ForwardStoreError.unsupportedVersion(version) }
+        return try JSONDecoder().decode(FileFormat.self, from: data).rules
+    }
+
+    public static func encode(_ rules: [ForwardRule]) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try SecureFile.write(encoder.encode(FileFormat(version: Self.currentVersion, rules: rules)), to: fileURL)
+        return try encoder.encode(FileFormat(version: currentVersion, rules: rules))
     }
 }

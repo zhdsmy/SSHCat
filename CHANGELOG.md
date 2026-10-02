@@ -4,12 +4,29 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 保存并连接、连接失败或退避期间立即重试，以及供终端手动执行的首次连接命令。
+- 主机选择器支持搜索、刷新和递归读取 SSH config 的 `Include`；支持 IPv6 主机、转发端点及对应监听冲突检查。
+- 规则 JSON 导入导出：导入前预览、重复规则跳过或复制、全新 ID、关闭自动启动，并在保存成功后一次性添加。
+- 菜单端口摘要、运行中 / 失败筛选、包含规则名称的端口冲突提示，以及通知和登录项的系统授权状态与设置入口。
+
+### 修复
+
+- 统一编辑与运行按钮的脏状态判断，等值端口和首尾空白不再产生无法保存的伪草稿。
+- 在字段旁展示校验错误，空白及无效端口文本不会丢失；退出时确认是否放弃草稿，返回编辑保留连接。
+
 ### 文档
 
 - README 默认英文，简体中文移至 `README.zh-Hans.md`；截图换成对应语言的 2x 全貌图（菜单栏面板 + 管理窗口）。
 
 ### English
 
+- Add Save and Connect, Retry Now, and a first-connection command to copy into Terminal.
+- Support searchable, refreshable SSH host suggestions with Include expansion, IPv6 hosts and endpoints, and address-aware listener conflicts.
+- Add JSON import/export with preview, duplicate handling, fresh IDs, automatic startup disabled, and atomic persistence before adding rules.
+- Show menu endpoint summaries, running/failed filters, named conflict warnings, and actual macOS notification/login-item approval status.
+- Normalize pending edits, retain invalid port text with inline errors, and protect unsaved drafts when quitting.
 - README now defaults to English, with Simplified Chinese in `README.zh-Hans.md`; screenshots are replaced by a localized 2x overview of the menu bar panel and management window.
 
 ## [0.2.0] - 2026-10-02

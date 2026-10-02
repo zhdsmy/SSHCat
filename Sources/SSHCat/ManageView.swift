@@ -15,13 +15,13 @@ struct ManageView: View {
                 VStack(spacing: 0) {
                     TextField(L10n.text("manage.search"), text: $navigation.searchText)
                         .textFieldStyle(.roundedBorder).padding(10)
+                    RuleFilterPicker().padding(.horizontal, 10).padding(.bottom, 6)
                     List(selection: $navigation.selection) {
-                        ForEach(manager.runners.filter { $0.rule.matches(navigation.searchText) }) { runner in
+                        ForEach(visibleRunners) { runner in
                             SidebarRow(runner: runner, unsaved: navigation.drafts[runner.id] != nil)
                                 .tag(runner.id)
                         }
-                        if !navigation.searchText.isEmpty,
-                           !manager.runners.contains(where: { $0.rule.matches(navigation.searchText) }) {
+                        if visibleRunners.isEmpty && !manager.runners.isEmpty {
                             Text(L10n.text("manage.no_matches")).font(.callout).foregroundStyle(.secondary)
                         }
                     }
@@ -43,6 +43,7 @@ struct ManageView: View {
                         NewRuleMenu { navigation.add($0, using: manager) }
                             .disabled(!manager.canEditRules)
                     }
+                    ToolbarItem { RuleTransferMenu(snapshotMode: snapshotMode) }
                 }
             } detail: {
                 detail.frame(minWidth: 480)
@@ -55,11 +56,15 @@ struct ManageView: View {
         }
     }
 
+    private var visibleRunners: [ForwardRunner] {
+        manager.runners.filter { navigation.filter.includes($0.state) && $0.rule.matches(navigation.searchText) }
+    }
+
     @ViewBuilder private var detail: some View {
         if navigation.showingGuide || manager.runners.isEmpty {
             UsageGuide()
         } else if let id = navigation.selection, let runner = manager.runner(id: id) {
-            RuleEditor(runner: runner, hosts: hosts, saved: navigation.drafts[id], snapshotMode: snapshotMode)
+            RuleEditor(runner: runner, hosts: $hosts, saved: navigation.drafts[id], snapshotMode: snapshotMode)
                 .id(runner.id)
         } else {
             VStack(spacing: 16) {
@@ -208,21 +213,24 @@ private struct RuleEditor: View {
     @ObservedObject var runner: ForwardRunner
     @EnvironmentObject var manager: ForwardManager
     @EnvironmentObject var navigation: Navigation
-    let hosts: [String]
+    @Binding var hosts: [String]
     let snapshotMode: Bool
 
     @ViewState private var draft: ForwardRule
     @ViewState private var portText: String
+    @ViewState private var ports: [UUID: RuleDraft.Ports]
+    @ViewState private var choosingHost = false
     @ViewState private var confirmDelete = false
     @ViewState private var showLog = false
 
     /// `saved` is an unsaved draft from an earlier visit to this rule.
-    init(runner: ForwardRunner, hosts: [String], saved: RuleDraft?, snapshotMode: Bool = false) {
+    init(runner: ForwardRunner, hosts: Binding<[String]>, saved: RuleDraft?, snapshotMode: Bool = false) {
         self.runner = runner
-        self.hosts = hosts
+        self._hosts = hosts
         self.snapshotMode = snapshotMode
         _draft = ViewState(initialValue: saved?.rule ?? runner.rule)
         _portText = ViewState(initialValue: saved?.portText ?? runner.rule.port.map(String.init) ?? "")
+        _ports = ViewState(initialValue: (saved ?? RuleDraft(rule: runner.rule)).ports)
         _confirmDelete = ViewState(initialValue: false)
     }
 
@@ -232,7 +240,10 @@ private struct RuleEditor: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if runner.state.reason != nil { StateDetail(state: runner.state) }
+                    if runner.state.reason != nil {
+                        StateDetail(state: runner.state)
+                        firstConnectionButton
+                    }
                     GroupBox { targetSection.padding(8) }
                     GroupBox { forwardsSection.padding(8) }
                     GroupBox { runSection.padding(8) }
@@ -243,11 +254,13 @@ private struct RuleEditor: View {
         }
         .onChange(of: draft) { _ in keepDraft() }
         .onChange(of: portText) { _ in keepDraft() }
+        .onChange(of: ports) { _ in keepDraft() }
         .onChange(of: runner.rule) { rule in
             // A reload may replace saved settings; keep real edits, refresh an untouched editor.
             guard navigation.drafts[runner.id] == nil else { return }
             draft = rule
             portText = rule.port.map(String.init) ?? ""
+            ports = RuleDraft(rule: rule).ports
         }
         .confirmationDialog(L10n.text("editor.confirm_delete"), isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L10n.text("action.delete"), role: .destructive) {
@@ -281,6 +294,7 @@ private struct RuleEditor: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help(L10n.text("action.more")).accessibilityLabel(L10n.text("action.more"))
             }
+            FieldError(issue: editing.issue(for: .name))
             HStack {
                 StatusDot(state: runner.state)
                 Text(runner.state.label).font(.callout).lineLimit(1)
@@ -294,9 +308,22 @@ private struct RuleEditor: View {
                 // The toggle runs the saved rule; starting it with edits pending would run stale settings.
                 .disabled((isDirty || parsedRule == nil) && !runner.state.isActive)
                 .help(isDirty && !runner.state.isActive ? L10n.text("editor.save_first") : "")
-                Button(L10n.text("action.save"), action: save)
+                Button(L10n.text("action.save")) { save() }
                     .disabled(saveDisabled || !manager.canEditRules)
                     .keyboardShortcut("s", modifiers: .command)
+            }
+            HStack {
+                if !runner.state.isActive && (runner.state == .stopped || isDirty) {
+                    Button(L10n.text("action.save_connect")) { save(connect: true) }
+                        .disabled(parsedRule == nil || !manager.canEditRules)
+                } else if runner.state.reason != nil {
+                    Button(L10n.text("action.retry")) { manager.retry(id: runner.id) }
+                        .disabled(isDirty)
+                }
+                if let issue = editing.issues.first?.issue {
+                    Text(L10n.text("editor.fix_fields")).font(.caption).foregroundStyle(.red)
+                        .help(issue.localizedDescription)
+                }
             }
             if isDirty {
                 HStack(spacing: 8) {
@@ -316,22 +343,25 @@ private struct RuleEditor: View {
                 HStack {
                     TextField(L10n.text("editor.host_prompt"), text: $draft.host)
                         .textFieldStyle(.roundedBorder)
-                    if !hosts.isEmpty {
-                        Menu {
-                            ForEach(hosts, id: \.self) { host in
-                                Button(host) { draft.host = host }
-                            }
-                        } label: { Image(systemName: "list.bullet") }
-                        .fixedSize().help(L10n.text("editor.ssh_config_hosts")).accessibilityLabel(L10n.text("editor.ssh_config_hosts"))
-                    }
+                    Button { choosingHost = true } label: { Image(systemName: "list.bullet") }
+                        .help(L10n.text("editor.ssh_config_hosts"))
+                        .accessibilityLabel(L10n.text("editor.ssh_config_hosts"))
+                        .popover(isPresented: $choosingHost) {
+                            HostPicker(hosts: hosts, refresh: {
+                                if !snapshotMode { hosts = SSHConfigHosts.load() }
+                            }, select: { draft.host = $0; choosingHost = false })
+                        }
                 }
             }
+            FieldError(issue: editing.issue(for: .host))
             LabeledContent(L10n.text("editor.user")) {
                 TextField(L10n.text("editor.config_default"), text: $draft.user).textFieldStyle(.roundedBorder)
             }
+            FieldError(issue: editing.issue(for: .user))
             LabeledContent(L10n.text("editor.port")) {
                 TextField(L10n.text("editor.config_default"), text: $portText).textFieldStyle(.roundedBorder)
             }
+            FieldError(issue: editing.issue(for: .sshPort))
             LabeledContent(L10n.text("editor.key")) {
                 HStack {
                     TextField(L10n.text("editor.key_default"), text: $draft.identityFile)
@@ -339,6 +369,7 @@ private struct RuleEditor: View {
                     Button(L10n.text("action.choose_file")) { chooseIdentity() }
                 }
             }
+            FieldError(issue: editing.issue(for: .identity))
             Text(L10n.text("editor.config_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -362,15 +393,21 @@ private struct RuleEditor: View {
                 Text(L10n.text("editor.forwards_empty")).font(.caption).foregroundStyle(.secondary)
             }
             ForEach($draft.forwards) { $forward in
-                ForwardRow(forward: $forward) {
+                ForwardRow(forward: $forward, ports: Binding(
+                    get: { editing.portDraft(forward) },
+                    set: { ports[forward.id] = $0 }
+                ), issues: editing.issues) {
                     draft.forwards.removeAll { $0.id == forward.id }
+                    ports[forward.id] = nil
                 }
             }
-            let clashes = manager.clashingEndpoints(in: draft)
+            let clashes = manager.listenerConflicts(in: parsedRule ?? draft)
             if !clashes.isEmpty {
-                Text(L10n.text("editor.port_clash", ListFormatter.localizedString(byJoining: clashes)))
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                ForEach(clashes, id: \.endpoint) { conflict in
+                    Text(L10n.text("editor.named_port_clash", conflict.endpoint,
+                                   ListFormatter.localizedString(byJoining: conflict.ruleNames)))
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
         }
     }
@@ -380,9 +417,7 @@ private struct RuleEditor: View {
             Text(L10n.text("action.run")).font(.headline)
             Toggle(L10n.text("editor.auto_restart"), isOn: $draft.autoRestart)
             Toggle(L10n.text("editor.auto_start"), isOn: $draft.autoStart)
-            if case .failure(let issue) = parsed() {
-                Text(issue.localizedDescription).foregroundStyle(.red).font(.callout)
-            }
+
             let endpoints = runner.rule.forwards.compactMap(\.localEndpoint)
             if !endpoints.isEmpty, (try? runner.rule.validate()) != nil {
                 LabeledContent(L10n.text("editor.local_addresses")) {
@@ -405,6 +440,7 @@ private struct RuleEditor: View {
             DisclosureGroup(L10n.text("editor.log"), isExpanded: $showLog) {
                 logView.padding(.top, 6)
             }
+            if runner.state.reason == nil { firstConnectionButton }
             CopyButton(text: diagnostics, label: L10n.text("action.copy_diagnostics"))
         }
     }
@@ -430,6 +466,13 @@ private struct RuleEditor: View {
 
     private let logEnd = "log-end"
 
+    @ViewBuilder private var firstConnectionButton: some View {
+        if let command = try? runner.rule.firstConnectionCommand(executable: executable) {
+            CopyButton(text: command, label: L10n.text("action.copy_first_connection"))
+                .help(L10n.text("editor.first_connection_hint"))
+        }
+    }
+
     private var diagnostics: String {
         Diagnostics.report(
             appVersion: appVersion,
@@ -449,65 +492,41 @@ private struct RuleEditor: View {
     }
 
     private var parsedRule: ForwardRule? {
-        if case .success(let rule) = parsed() { return rule }
-        return nil
+        try? editing.validated()
     }
 
     private var saveDisabled: Bool {
-        guard let rule = parsedRule else { return true }
-        return rule == runner.rule
+        parsedRule == nil || !isDirty
     }
 
     private var savedPortText: String { runner.rule.port.map(String.init) ?? "" }
 
-    private var isDirty: Bool { draft != runner.rule || portText != savedPortText }
-
-    private func keepDraft() {
-        navigation.drafts[runner.id] = isDirty ? RuleDraft(rule: draft, portText: portText) : nil
+    private var editing: RuleDraft {
+        var value = RuleDraft(rule: draft, portText: portText)
+        value.ports = ports
+        return value
     }
 
-    private func save() {
+    private var isDirty: Bool { editing.isDirty(comparedTo: runner.rule) }
+
+    private func keepDraft() {
+        navigation.drafts[runner.id] = isDirty ? editing : nil
+    }
+
+    private func save(connect: Bool = false) {
         guard let rule = parsedRule else { return }
-        guard manager.update(rule) else { return }
+        guard connect ? manager.saveAndStart(rule) : manager.update(rule) else { return }
         draft = rule
         portText = savedPortText
+        ports = RuleDraft(rule: runner.rule).ports
         navigation.drafts[runner.id] = nil
     }
 
     private func revert() {
         draft = runner.rule
         portText = savedPortText
+        ports = RuleDraft(rule: runner.rule).ports
         navigation.drafts[runner.id] = nil
-    }
-
-    private func parsed() -> Result<ForwardRule, ForwardIssue> {
-        var rule = draft
-        rule.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        rule.user = draft.user.trimmingCharacters(in: .whitespacesAndNewlines)
-        rule.host = draft.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        rule.identityFile = draft.identityFile.trimmingCharacters(in: .whitespacesAndNewlines)
-        for index in rule.forwards.indices {
-            rule.forwards[index].bindAddress = rule.forwards[index].bindAddress
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            rule.forwards[index].targetHost = rule.forwards[index].targetHost
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let trimmedPort = portText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedPort.isEmpty {
-            rule.port = nil
-        } else if let port = Int(trimmedPort), (1...65535).contains(port) {
-            rule.port = port
-        } else {
-            return .failure(.invalidPort)
-        }
-        do {
-            try rule.validate()
-            return .success(rule)
-        } catch let issue as ForwardIssue {
-            return .failure(issue)
-        } catch {
-            return .failure(.emptyName)
-        }
     }
 
     private func chooseIdentity() {
@@ -525,6 +544,8 @@ private struct RuleEditor: View {
 
 private struct ForwardRow: View {
     @Binding var forward: PortForward
+    @Binding var ports: RuleDraft.Ports
+    let issues: [(field: RuleField, issue: ForwardIssue)]
     let onDelete: () -> Void
 
     var body: some View {
@@ -544,19 +565,25 @@ private struct ForwardRow: View {
                 Text(forward.kind == .remote ? L10n.text("forward.remote_listener") : L10n.text("forward.local_listener")).font(.caption).frame(width: 90, alignment: .leading)
                 TextField(L10n.text("forward.bind_address"), text: $forward.bindAddress)
                     .textFieldStyle(.roundedBorder)
-                TextField(L10n.text("editor.port"), value: $forward.bindPort, format: IntegerFormatStyle<Int>().grouping(.never))
+                TextField(L10n.text("editor.port"), text: $ports.bind)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 90)
             }
+            FieldError(issue: issues.first { $0.field == .bindAddress(forward.id) }?.issue)
+            FieldError(issue: issues.first { $0.field == .bindPort(forward.id) }?.issue)
             if forward.kind != .dynamic {
                 HStack {
                     Text(forward.kind == .local ? L10n.text("forward.remote_target") : L10n.text("forward.local_target")).font(.caption).frame(width: 90, alignment: .leading)
                     TextField(forward.kind == .local ? L10n.text("forward.remote_target_host") : L10n.text("forward.local_target_host"), text: $forward.targetHost)
                         .textFieldStyle(.roundedBorder)
-                    TextField(L10n.text("editor.port"), value: $forward.targetPort, format: IntegerFormatStyle<Int>().grouping(.never))
+                    TextField(L10n.text("editor.port"), text: $ports.target)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
                 }
+            }
+            if forward.kind != .dynamic {
+                FieldError(issue: issues.first { $0.field == .targetHost(forward.id) }?.issue)
+                FieldError(issue: issues.first { $0.field == .targetPort(forward.id) }?.issue)
             }
             Text(hint)
                 .font(.caption)
@@ -578,5 +605,32 @@ private struct ForwardRow: View {
         case .remote: return L10n.text("forward.remote_hint")
         case .dynamic: return L10n.text("forward.dynamic_hint")
         }
+    }
+}
+
+struct HostPicker: View {
+    let hosts: [String]
+    let refresh: () -> Void
+    let select: (String) -> Void
+    @ViewState private var search = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                TextField(L10n.text("hosts.search"), text: $search).textFieldStyle(.roundedBorder)
+                Button(L10n.text("hosts.refresh"), action: refresh)
+            }
+            let matches = hosts.filter { search.isEmpty || $0.localizedStandardContains(search) }
+            if matches.isEmpty {
+                Text(L10n.text("hosts.empty")).foregroundStyle(.secondary)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading) {
+                    ForEach(matches, id: \.self) { host in
+                        Button(host) { select(host) }.buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                    }
+                }
+            }
+        }.padding().frame(width: 340, height: 260)
     }
 }
