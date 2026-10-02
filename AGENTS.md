@@ -43,7 +43,7 @@ swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
 - 【SHOULD】注释解释“为什么”（约束、取舍、ssh 的行为怪癖），一眼能看懂的代码不写注释。
 - 【SHOULD】小而聚焦的改动，贴合周围代码的命名和风格；不做无关重构。
 - 界面及核心用户文案通过 `L10n.text` / `L10n.core` 与 `Sources/SSHCatCore/Resources/{en,zh-Hans,zh-Hant}.lproj/` 管理，同时提供英语、简体中文和繁体中文；使用稳定英文语义键和完整格式字符串，不拼接翻译句子。语言名称自身可保留原生名称。命令行参数、用户数据与 SSH 原始输出不翻译。
-- 修改用户说明时同步更新 `README.md` 与 `README.en.md`，保留两者顶部的语言跳转链接。新增翻译须通过键完整性和格式参数检查。
+- 修改用户说明时同步更新 `README.md`（英文，默认）与 `README.zh-Hans.md`，保留两者顶部的语言跳转链接。新增翻译须通过键完整性和格式参数检查。
 
 ## 安全与隐私
 
@@ -56,7 +56,7 @@ swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
 
 ## Git 与提交
 
-界面修改后使用 `snapshot.sh` 检查深浅色及相关异常状态；README 截图保存在 `docs/screenshots/`，只能来自该隔离快照。快照不包含标题栏、工具栏和真实交互，不启动使用真实数据的 App 来补拍。
+界面修改后使用 `snapshot.sh` 检查深浅色及相关异常状态；README 截图保存在 `docs/screenshots/`，只能来自该隔离快照：取对应语言的 `overview.png`（菜单栏面板 + 管理窗口，2x），存为 `overview-en.png` / `overview-zh-Hans.png`。快照不包含标题栏、工具栏和真实交互，不启动使用真实数据的 App 来补拍。
 
 - 功能开发用短分支 + PR，合入 `main` 前须 CI 的 `build-test` 通过。
 - 【MUST】提交信息遵循 Conventional Commits：`<type>(<scope>): <subject>`，type 取 `feat` / `fix` / `refactor` / `docs` / `test` / `build` / `ci` / `chore`；subject 简短，中英文皆可。

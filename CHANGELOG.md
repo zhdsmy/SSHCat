@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 文档
+
+- README 默认英文，简体中文移至 `README.zh-Hans.md`；截图换成对应语言的 2x 全貌图（菜单栏面板 + 管理窗口）。
+
+### English
+
+- README now defaults to English, with Simplified Chinese in `README.zh-Hans.md`; screenshots are replaced by a localized 2x overview of the menu bar panel and management window.
+
 ## [0.2.0] - 2026-10-02
 
 ### 新增
