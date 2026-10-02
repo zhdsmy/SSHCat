@@ -80,6 +80,7 @@ enum Snapshot {
         navigation.selection = rules[0].id
         try await renderer.page("menu", MenuContent())
         try await renderer.page("manage", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 700))
+        try await renderer.page("overview", Overview(), size: Overview.size, scale: 2)
         navigation.selection = rules[3].id
         try await renderer.page("failed", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 620))
         navigation.selection = rules[4].id
@@ -125,6 +126,37 @@ enum Snapshot {
     }
 }
 
+/// README image: the menu bar panel next to the management window, so one picture shows the whole app.
+private struct Overview: View {
+    static let size = CGSize(width: 1200, height: 830)
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            LinearGradient(colors: [Color(red: 1.0, green: 0.82, blue: 0.62), Color(red: 0.56, green: 0.6, blue: 0.72)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            HStack {
+                Spacer()
+                Image(nsImage: MenuBarIcon.active).renderingMode(.template)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
+                    .padding(.trailing, 190)
+            }
+            .frame(width: Self.size.width, height: 26)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.7))
+            window(ManageView(snapshotMode: true).frame(width: 800, height: 732)).offset(x: 32, y: 66)
+            window(MenuContent().fixedSize()).offset(x: 856, y: 32)
+        }
+    }
+
+    private func window<V: View>(_ content: V) -> some View {
+        content
+            .background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.black.opacity(0.15)))
+            .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+    }
+}
+
 @MainActor
 private final class SnapshotRenderer {
     let output: URL
@@ -138,7 +170,7 @@ private final class SnapshotRenderer {
         self.navigation = navigation
     }
 
-    func page<V: View>(_ name: String, _ view: V, size: CGSize? = nil) async throws {
+    func page<V: View>(_ name: String, _ view: V, size: CGSize? = nil, scale: CGFloat = 1) async throws {
         let root = view.environmentObject(manager).environmentObject(navigation)
             .environment(\.locale, L10n.locale)
             .frame(width: size?.width, height: size?.height, alignment: .topLeading)
@@ -151,7 +183,7 @@ private final class SnapshotRenderer {
         windows.append(window)
         try await Task.sleep(nanoseconds: 250_000_000)
         host.layoutSubtreeIfNeeded()
-        try save(name, host)
+        try save(name, host, scale: scale)
         if let scroll = scrollViews(in: host).filter({
             $0.contentSize.width > host.bounds.width / 2 && $0.contentSize.height > 100
                 && ($0.documentView?.bounds.height ?? 0) > $0.contentSize.height + 1
@@ -165,7 +197,7 @@ private final class SnapshotRenderer {
                 scroll.reflectScrolledClipView(scroll.contentView)
                 try await Task.sleep(nanoseconds: 100_000_000)
                 host.layoutSubtreeIfNeeded()
-                try save("\(name)-scroll-\(index)", host)
+                try save("\(name)-scroll-\(index)", host, scale: scale)
             }
         }
     }
@@ -174,8 +206,14 @@ private final class SnapshotRenderer {
         ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap { scrollViews(in: $0) }
     }
 
-    private func save<V: View>(_ name: String, _ host: NSHostingView<V>) throws {
-        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw CocoaError(.fileWriteUnknown) }
+    /// The offscreen window renders at 1x; `scale` draws into a larger bitmap so README images stay sharp.
+    private func save<V: View>(_ name: String, _ host: NSHostingView<V>, scale: CGFloat) throws {
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(host.bounds.width * scale),
+                                            pixelsHigh: Int(host.bounds.height * scale), bitsPerSample: 8,
+                                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { throw CocoaError(.fileWriteUnknown) }
+        bitmap.size = host.bounds.size
         host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
         try png.write(to: output.appendingPathComponent("\(name).png"))
