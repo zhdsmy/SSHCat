@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-02
+
 ### 新增
 
 - 统一 i18n 架构：菜单、管理窗口、设置、使用说明、校验错误、通知及诊断支持英语、简体中文和繁体中文。
@@ -52,6 +54,7 @@
 - 数据文件 0600、目录 0700、原子写入；不保存密码或私钥内容。
 - 以 universal（Apple 芯片 + Intel）DMG 发布，ad-hoc 签名，未经 Apple 公证。
 
-[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zhdsmy/SSHCat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/zhdsmy/SSHCat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/zhdsmy/SSHCat/releases/tag/v0.1.0
