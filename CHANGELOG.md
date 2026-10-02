@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-03
+
 ### 新增
 
 - 保存并连接、连接失败或退避期间立即重试，以及供终端手动执行的首次连接命令。
@@ -79,7 +81,8 @@
 - 数据文件 0600、目录 0700、原子写入；不保存密码或私钥内容。
 - 以 universal（Apple 芯片 + Intel）DMG 发布，ad-hoc 签名，未经 Apple 公证。
 
-[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/zhdsmy/SSHCat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zhdsmy/SSHCat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/zhdsmy/SSHCat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/zhdsmy/SSHCat/releases/tag/v0.1.0
