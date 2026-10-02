@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 统一 i18n 架构：菜单、管理窗口、设置、使用说明、校验错误、通知及诊断支持英语、简体中文和繁体中文。
+- 默认跟随系统语言，不支持的语言回退英语；可在设置选择语言，下次启动生效，不中断现有转发，也不改写用户规则。
+- 增加完整英文 README，与简体中文版本互相跳转，并提供对应语言的界面截图。
+- 三种语言的隔离快照、翻译键与格式参数完整性检查；App 和 universal DMG 携带完整 SwiftPM 语言资源。
+
+### English
+
+- Add English, Simplified Chinese, and Traditional Chinese throughout the app using native localization catalogs.
+- Follow the system language by default, with a language override in Settings that takes effect on the next launch.
+- Add an English README, language links, localized screenshots, and checks for translation coverage and formatting.
+
 ## [0.1.1] - 2026-10-02
 
 ### 新增

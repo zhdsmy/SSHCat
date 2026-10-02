@@ -14,16 +14,16 @@ public enum Diagnostics {
         home: String = NSHomeDirectory()
     ) -> String {
         var lines = [
-            "SSHCat 诊断信息",
-            "时间：\(ISO8601DateFormatter().string(from: date))",
-            "App：\(appVersion)",
-            "ssh：\(sshVersion ?? "未知")",
-            "macOS：\(ProcessInfo.processInfo.operatingSystemVersionString)",
-            "规则：\(rule.name)",
-            "状态：\(state)",
-            "命令：\(commandLine)",
+            L10n.core("diagnostics.title"),
+            L10n.core("diagnostics.time", ISO8601DateFormatter().string(from: date)),
+            L10n.core("diagnostics.app", appVersion),
+            L10n.core("diagnostics.ssh", sshVersion ?? L10n.core("diagnostics.unknown")),
+            L10n.core("diagnostics.os", ProcessInfo.processInfo.operatingSystemVersionString),
+            L10n.core("diagnostics.rule", rule.name),
+            L10n.core("diagnostics.state", state),
+            L10n.core("diagnostics.command", commandLine),
             "",
-            "最近日志：",
+            L10n.core("diagnostics.recent_log"),
         ]
         lines.append(contentsOf: log.suffix(80))
         let text = lines.joined(separator: "\n")

@@ -12,12 +12,15 @@ enum Snapshot {
             exit(64)
         }
         let output = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
+        let requested = arguments.first { $0.hasPrefix("--language=") }.map { String($0.dropFirst(11)) } ?? "en"
+        guard let language = AppLanguage(rawValue: requested), language != .system else { exit(64) }
+        Entry.configureLanguage(language)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.appearance = NSAppearance(named: arguments.contains("--dark") ? .darkAqua : .aqua)
         Task {
             do {
-                try await capture(to: output)
+                try await capture(to: output, language: language)
                 exit(0)
             } catch {
                 FileHandle.standardError.write(Data("snapshot failed: \(error)\n".utf8))
@@ -28,7 +31,7 @@ enum Snapshot {
         exit(0)
     }
 
-    private static func capture(to output: URL) async throws {
+    private static func capture(to output: URL, language: AppLanguage) async throws {
         let fm = FileManager.default
         try fm.createDirectory(at: output, withIntermediateDirectories: true)
         let directory = fm.temporaryDirectory.appendingPathComponent("SSHCat-snapshot-\(UUID().uuidString)")
@@ -60,11 +63,11 @@ enum Snapshot {
         try await renderer.page("empty-manage", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 640))
 
         let rules = [
-            ForwardRule(name: "开发网站", host: "devbox", forwards: [PortForward()], autoStart: true),
-            ForwardRule(name: "SOCKS 代理", host: "gateway", forwards: [PortForward(kind: .dynamic, bindPort: 1080)]),
-            ForwardRule(name: "远程演示", host: "demo", forwards: [PortForward(kind: .remote, bindPort: 9000, targetPort: 3000)]),
-            ForwardRule(name: "等待确认指纹", host: "missing.example", forwards: [PortForward(bindPort: 8081)]),
-            ForwardRule(name: "等待网络恢复", host: "offline.example", forwards: [PortForward(bindPort: 8082)]),
+            ForwardRule(name: "Development Website", host: "devbox", forwards: [PortForward()], autoStart: true),
+            ForwardRule(name: "SOCKS Proxy", host: "gateway", forwards: [PortForward(kind: .dynamic, bindPort: 1080)]),
+            ForwardRule(name: "Remote Demo", host: "demo", forwards: [PortForward(kind: .remote, bindPort: 9000, targetPort: 3000)]),
+            ForwardRule(name: "Host Key Check", host: "missing.example", forwards: [PortForward(bindPort: 8081)]),
+            ForwardRule(name: "Waiting for Network", host: "offline.example", forwards: [PortForward(bindPort: 8082)]),
         ]
         for rule in rules { manager.add(rule) }
         for index in [0, 3, 4] { manager.setActive(true, id: rules[index].id) }
@@ -82,7 +85,7 @@ enum Snapshot {
         navigation.selection = rules[4].id
         try await renderer.page("reconnecting", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 620))
         var draft = rules[0]
-        draft.name = "开发网站 · 未保存的修改"
+        draft.name = "Development Website · Draft"
         navigation.drafts[draft.id] = RuleDraft(rule: draft, portText: "invalid")
         navigation.show(draft.id)
         try await renderer.page("draft", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 700))
@@ -96,17 +99,18 @@ enum Snapshot {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        settings.language = language
         try await renderer.page("settings", SettingsView(settings: settings, snapshotMode: true),
-                                size: CGSize(width: 520, height: 600))
+                                size: CGSize(width: 520, height: 680))
         try await renderer.page("update-available", SettingsView(settings: settings, snapshotMode: true, update: .available("v0.2.0")),
-                                size: CGSize(width: 520, height: 600))
+                                size: CGSize(width: 520, height: 680))
         var long = rules[2]
-        long.name = "演示环境 · " + String(repeating: "长期运行的端口转发", count: 8)
+        long.name = "Demo Environment · " + String(repeating: "Long-running Port Forward ", count: 8)
         manager.update(long)
         navigation.selection = long.id
         try await renderer.page("narrow-long", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 580))
         for index in 1...18 {
-            manager.add(ForwardRule(name: "项目 \(index)", host: "devbox", forwards: [PortForward(bindPort: 10000 + index)]))
+            manager.add(ForwardRule(name: "Project \(index)", host: "devbox", forwards: [PortForward(bindPort: 10000 + index)]))
         }
         try await renderer.page("many-menu", MenuContent())
 
@@ -136,6 +140,7 @@ private final class SnapshotRenderer {
 
     func page<V: View>(_ name: String, _ view: V, size: CGSize? = nil) async throws {
         let root = view.environmentObject(manager).environmentObject(navigation)
+            .environment(\.locale, L10n.locale)
             .frame(width: size?.width, height: size?.height, alignment: .topLeading)
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: root)

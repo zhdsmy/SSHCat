@@ -34,6 +34,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/SSHCat"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+RESOURCE_BUNDLE="$(dirname "$BIN")/SSHCat_SSHCatCore.bundle"
+if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
+  echo "localization resource bundle not found at $RESOURCE_BUNDLE" >&2
+  exit 1
+fi
+ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/SSHCat_SSHCatCore.bundle"
 
 codesign --force --sign - "$APP"
 # Finder caches icons per bundle path; a fresh mtime makes it pick up a changed AppIcon.

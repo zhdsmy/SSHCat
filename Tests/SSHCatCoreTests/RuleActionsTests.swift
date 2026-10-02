@@ -9,7 +9,7 @@ import Testing
                                autoRestart: false, autoStart: true)
         let copy = rule.duplicate()
         #expect(copy.id != rule.id)
-        #expect(copy.name == "Web 副本")
+        #expect(copy.name == L10n.core("rule.copy_name", "Web"))
         #expect(!copy.autoStart)
         #expect(!copy.autoRestart)
         #expect(Set(copy.forwards.map(\.id)).isDisjoint(with: rule.forwards.map(\.id)))

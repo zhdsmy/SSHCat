@@ -13,7 +13,7 @@ struct ManageView: View {
             StorageNotice()
             NavigationSplitView {
                 VStack(spacing: 0) {
-                    TextField("搜索名称、主机或端口", text: $navigation.searchText)
+                    TextField(L10n.text("manage.search"), text: $navigation.searchText)
                         .textFieldStyle(.roundedBorder).padding(10)
                     List(selection: $navigation.selection) {
                         ForEach(manager.runners.filter { $0.rule.matches(navigation.searchText) }) { runner in
@@ -22,7 +22,7 @@ struct ManageView: View {
                         }
                         if !navigation.searchText.isEmpty,
                            !manager.runners.contains(where: { $0.rule.matches(navigation.searchText) }) {
-                            Text("没有匹配的转发").font(.callout).foregroundStyle(.secondary)
+                            Text(L10n.text("manage.no_matches")).font(.callout).foregroundStyle(.secondary)
                         }
                     }
                     .listStyle(.sidebar)
@@ -31,7 +31,7 @@ struct ManageView: View {
                         navigation.selection = nil
                         navigation.showingGuide = true
                     } label: {
-                        Label("使用说明", systemImage: "questionmark.circle")
+                        Label(L10n.text("action.guide"), systemImage: "questionmark.circle")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain).padding(12)
@@ -64,8 +64,8 @@ struct ManageView: View {
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "network").font(.system(size: 36)).foregroundStyle(.secondary)
-                Text("管理你的 SSH 转发").font(.title2.weight(.semibold))
-                Text("从左侧选择规则，查看连接状态或修改配置。")
+                Text(L10n.text("manage.title")).font(.title2.weight(.semibold))
+                Text(L10n.text("manage.select_rule"))
                     .foregroundStyle(.secondary)
                 NewRuleMenu { navigation.add($0, using: manager) }
                     .disabled(!manager.canEditRules)
@@ -84,10 +84,10 @@ private struct SidebarRow: View {
             StatusDot(state: runner.state).padding(.top, 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text(runner.rule.name).fontWeight(.medium).lineLimit(1).help(runner.rule.name)
-                Text(runner.rule.destination.isEmpty ? "等待配置主机" : runner.rule.destination)
+                Text(runner.rule.destination.isEmpty ? L10n.text("manage.host_pending") : runner.rule.destination)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     .help(runner.rule.destination)
-                Text(unsaved ? "未保存 · \(runner.state.label)" : runner.state.label)
+                Text(unsaved ? L10n.text("manage.unsaved_state", runner.state.label) : runner.state.label)
                     .font(.caption).foregroundStyle(unsaved ? .orange : runner.state.color)
                     .lineLimit(1).help(runner.state.reason ?? runner.state.label)
             }
@@ -249,59 +249,59 @@ private struct RuleEditor: View {
             draft = rule
             portText = rule.port.map(String.init) ?? ""
         }
-        .confirmationDialog("删除这条转发？", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("删除", role: .destructive) {
+        .confirmationDialog(L10n.text("editor.confirm_delete"), isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button(L10n.text("action.delete"), role: .destructive) {
                 let id = runner.id
                 guard manager.remove(id: id) else { return }
                 navigation.selection = nil
                 navigation.drafts[id] = nil
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("action.cancel"), role: .cancel) {}
         }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                TextField("名称", text: $draft.name)
+                TextField(L10n.text("editor.name"), text: $draft.name)
                     .textFieldStyle(.roundedBorder)
                     .font(.title2)
-                    .accessibilityLabel("转发名称")
+                    .accessibilityLabel(L10n.text("editor.name_accessibility"))
                 Menu {
-                    Button("创建副本") {
+                    Button(L10n.text("action.copy_rule")) {
                         let copy = runner.rule.duplicate()
                         guard manager.add(copy) else { return }
                         navigation.show(copy.id)
                     }
                     .disabled(isDirty || !manager.canEditRules)
                     Divider()
-                    Button("删除转发…", role: .destructive) { confirmDelete = true }
+                    Button(L10n.text("action.delete_rule"), role: .destructive) { confirmDelete = true }
                         .disabled(!manager.canEditRules)
                 } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize()
-                .help("更多操作").accessibilityLabel("更多操作")
+                .help(L10n.text("action.more")).accessibilityLabel(L10n.text("action.more"))
             }
             HStack {
                 StatusDot(state: runner.state)
                 Text(runner.state.label).font(.callout).lineLimit(1)
                     .help(runner.state.reason ?? runner.state.label)
                 Spacer()
-                Toggle("运行", isOn: Binding(
+                Toggle(L10n.text("action.run"), isOn: Binding(
                     get: { runner.state.isActive },
                     set: { manager.setActive($0, id: runner.id) }
                 ))
                 .toggleStyle(.switch)
                 // The toggle runs the saved rule; starting it with edits pending would run stale settings.
                 .disabled((isDirty || parsedRule == nil) && !runner.state.isActive)
-                .help(isDirty && !runner.state.isActive ? "有未保存的修改，先保存再运行" : "")
-                Button("保存", action: save)
+                .help(isDirty && !runner.state.isActive ? L10n.text("editor.save_first") : "")
+                Button(L10n.text("action.save"), action: save)
                     .disabled(saveDisabled || !manager.canEditRules)
                     .keyboardShortcut("s", modifiers: .command)
             }
             if isDirty {
                 HStack(spacing: 8) {
-                    Text(runner.state.isActive ? "有未保存的修改。保存连接参数后会重启。" : "有未保存的修改。")
-                    Button("还原", action: revert).buttonStyle(.link)
+                    Text(runner.state.isActive ? L10n.text("editor.unsaved_active") : L10n.text("editor.unsaved"))
+                    Button(L10n.text("action.revert"), action: revert).buttonStyle(.link)
                 }
                 .font(.caption)
                 .foregroundStyle(.orange)
@@ -311,10 +311,10 @@ private struct RuleEditor: View {
 
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("目标").font(.headline)
-            LabeledContent("主机") {
+            Text(L10n.text("editor.target")).font(.headline)
+            LabeledContent(L10n.text("editor.host")) {
                 HStack {
-                    TextField("SSH Host 或主机名", text: $draft.host)
+                    TextField(L10n.text("editor.host_prompt"), text: $draft.host)
                         .textFieldStyle(.roundedBorder)
                     if !hosts.isEmpty {
                         Menu {
@@ -322,24 +322,24 @@ private struct RuleEditor: View {
                                 Button(host) { draft.host = host }
                             }
                         } label: { Image(systemName: "list.bullet") }
-                        .fixedSize().help("从 SSH 配置选择").accessibilityLabel("从 SSH 配置选择")
+                        .fixedSize().help(L10n.text("editor.ssh_config_hosts")).accessibilityLabel(L10n.text("editor.ssh_config_hosts"))
                     }
                 }
             }
-            LabeledContent("用户") {
-                TextField("留空使用 SSH 配置", text: $draft.user).textFieldStyle(.roundedBorder)
+            LabeledContent(L10n.text("editor.user")) {
+                TextField(L10n.text("editor.config_default"), text: $draft.user).textFieldStyle(.roundedBorder)
             }
-            LabeledContent("端口") {
-                TextField("留空使用 SSH 配置", text: $portText).textFieldStyle(.roundedBorder)
+            LabeledContent(L10n.text("editor.port")) {
+                TextField(L10n.text("editor.config_default"), text: $portText).textFieldStyle(.roundedBorder)
             }
-            LabeledContent("密钥") {
+            LabeledContent(L10n.text("editor.key")) {
                 HStack {
-                    TextField("留空使用 SSH 配置或 agent", text: $draft.identityFile)
+                    TextField(L10n.text("editor.key_default"), text: $draft.identityFile)
                         .textFieldStyle(.roundedBorder)
-                    Button("选择…") { chooseIdentity() }
+                    Button(L10n.text("action.choose_file")) { chooseIdentity() }
                 }
             }
-            Text("端口和密钥留空时，ssh 会使用这个 Host 在配置里的 Port、IdentityFile 和 ProxyJump。")
+            Text(L10n.text("editor.config_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -348,18 +348,18 @@ private struct RuleEditor: View {
     private var forwardsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("转发").font(.headline)
+                Text(L10n.text("editor.forwards")).font(.headline)
                 Spacer()
-                Menu("添加") {
+                Menu(L10n.text("action.add")) {
                     ForEach(ForwardKind.allCases, id: \.self) { kind in
-                        Button(kind == .dynamic ? "SOCKS 代理" : "\(kind.label)转发") {
+                        Button(kind.defaultName) {
                             draft.forwards.append(PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080))
                         }
                     }
                 }.fixedSize()
             }
             if draft.forwards.isEmpty {
-                Text("至少需要一条转发。").font(.caption).foregroundStyle(.secondary)
+                Text(L10n.text("editor.forwards_empty")).font(.caption).foregroundStyle(.secondary)
             }
             ForEach($draft.forwards) { $forward in
                 ForwardRow(forward: $forward) {
@@ -368,7 +368,7 @@ private struct RuleEditor: View {
             }
             let clashes = manager.clashingEndpoints(in: draft)
             if !clashes.isEmpty {
-                Text("本机 \(clashes.joined(separator: "、")) 已被其他规则或本规则的另一条转发使用，同时运行时会有一方失败。")
+                Text(L10n.text("editor.port_clash", ListFormatter.localizedString(byJoining: clashes)))
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -377,42 +377,42 @@ private struct RuleEditor: View {
 
     private var runSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("运行").font(.headline)
-            Toggle("意外退出后自动重连", isOn: $draft.autoRestart)
-            Toggle("打开 App 时自动启动", isOn: $draft.autoStart)
+            Text(L10n.text("action.run")).font(.headline)
+            Toggle(L10n.text("editor.auto_restart"), isOn: $draft.autoRestart)
+            Toggle(L10n.text("editor.auto_start"), isOn: $draft.autoStart)
             if case .failure(let issue) = parsed() {
                 Text(issue.localizedDescription).foregroundStyle(.red).font(.callout)
             }
             let endpoints = runner.rule.forwards.compactMap(\.localEndpoint)
             if !endpoints.isEmpty, (try? runner.rule.validate()) != nil {
-                LabeledContent("本地地址") {
+                LabeledContent(L10n.text("editor.local_addresses")) {
                     Text(endpoints.joined(separator: "\n")).font(.callout.monospaced()).textSelection(.enabled)
-                    CopyButton(text: endpoints.joined(separator: "\n"), label: "复制本地地址", iconOnly: true)
+                    CopyButton(text: endpoints.joined(separator: "\n"), label: L10n.text("action.copy_address"), iconOnly: true)
                         .buttonStyle(.borderless)
                 }
             }
-            Text("“运行中”表示 SSH 会话已建立；访问服务还需确认目标端口可用。")
+            Text(L10n.text("editor.running_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            DisclosureGroup("等价命令") {
+            DisclosureGroup(L10n.text("editor.command")) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(commandText)
                         .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    CopyButton(text: commandText, label: "复制命令").disabled(parsedRule == nil)
+                    CopyButton(text: commandText, label: L10n.text("action.copy_command")).disabled(parsedRule == nil)
                 }.padding(.top, 6)
             }
-            DisclosureGroup("连接日志", isExpanded: $showLog) {
+            DisclosureGroup(L10n.text("editor.log"), isExpanded: $showLog) {
                 logView.padding(.top, 6)
             }
-            CopyButton(text: diagnostics, label: "复制诊断信息")
+            CopyButton(text: diagnostics, label: L10n.text("action.copy_diagnostics"))
         }
     }
 
     private var logView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                Text(runner.log.isEmpty ? "还没有输出" : runner.log.joined(separator: "\n"))
+                Text(runner.log.isEmpty ? L10n.text("editor.log_empty") : runner.log.joined(separator: "\n"))
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -444,7 +444,7 @@ private struct RuleEditor: View {
     private var executable: String { snapshotMode ? "/usr/bin/ssh" : manager.binaryPath ?? "/usr/bin/ssh" }
 
     private var commandText: String {
-        guard let rule = parsedRule else { return "配置还不完整，无法生成命令" }
+        guard let rule = parsedRule else { return L10n.core("rule.command_unavailable") }
         return rule.commandLine(executable: executable)
     }
 
@@ -516,8 +516,8 @@ private struct RuleEditor: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
-        panel.message = "选择私钥文件"
-        panel.prompt = "选择"
+        panel.message = L10n.text("editor.choose_key")
+        panel.prompt = L10n.text("action.choose")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         draft.identityFile = url.path
     }
@@ -530,7 +530,7 @@ private struct ForwardRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Picker("类型", selection: $forward.kind) {
+                Picker(L10n.text("forward.type"), selection: $forward.kind) {
                     ForEach(ForwardKind.allCases, id: \.self) { kind in
                         Text(kind.label).tag(kind)
                     }
@@ -538,22 +538,22 @@ private struct ForwardRow: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 280)
                 Spacer()
-                Button("删除", action: onDelete)
+                Button(L10n.text("action.delete"), action: onDelete)
             }
             HStack {
-                Text(forward.kind == .remote ? "远端监听" : "本机监听").font(.caption).frame(width: 60, alignment: .leading)
-                TextField("绑定地址", text: $forward.bindAddress)
+                Text(forward.kind == .remote ? L10n.text("forward.remote_listener") : L10n.text("forward.local_listener")).font(.caption).frame(width: 90, alignment: .leading)
+                TextField(L10n.text("forward.bind_address"), text: $forward.bindAddress)
                     .textFieldStyle(.roundedBorder)
-                TextField("端口", value: $forward.bindPort, format: IntegerFormatStyle<Int>().grouping(.never))
+                TextField(L10n.text("editor.port"), value: $forward.bindPort, format: IntegerFormatStyle<Int>().grouping(.never))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 90)
             }
             if forward.kind != .dynamic {
                 HStack {
-                    Text(forward.kind == .local ? "远端目标" : "本机目标").font(.caption).frame(width: 60, alignment: .leading)
-                    TextField(forward.kind == .local ? "远端目标主机" : "本机目标主机", text: $forward.targetHost)
+                    Text(forward.kind == .local ? L10n.text("forward.remote_target") : L10n.text("forward.local_target")).font(.caption).frame(width: 90, alignment: .leading)
+                    TextField(forward.kind == .local ? L10n.text("forward.remote_target_host") : L10n.text("forward.local_target_host"), text: $forward.targetHost)
                         .textFieldStyle(.roundedBorder)
-                    TextField("端口", value: $forward.targetPort, format: IntegerFormatStyle<Int>().grouping(.never))
+                    TextField(L10n.text("editor.port"), value: $forward.targetPort, format: IntegerFormatStyle<Int>().grouping(.never))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
                 }
@@ -562,7 +562,7 @@ private struct ForwardRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if forward.needsGatewayPorts {
-                Text("绑定地址不是回环。远程转发要在服务器上监听这个地址，sshd 需要打开 GatewayPorts。")
+                Text(L10n.text("forward.gateway_ports"))
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -574,9 +574,9 @@ private struct ForwardRow: View {
 
     private var hint: String {
         switch forward.kind {
-        case .local: return "本机绑定地址:端口 → SSH 服务器能访问的目标"
-        case .remote: return "SSH 服务器上的绑定地址:端口 → 本机目标"
-        case .dynamic: return "本机 SOCKS 代理"
+        case .local: return L10n.text("forward.local_hint")
+        case .remote: return L10n.text("forward.remote_hint")
+        case .dynamic: return L10n.text("forward.dynamic_hint")
         }
     }
 }

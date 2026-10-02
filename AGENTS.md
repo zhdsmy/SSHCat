@@ -31,7 +31,7 @@ swift build --product SSHCatPackageTests && swift test --skip-build   # 单测�
 UNIVERSAL=1 ./scripts/make-dmg.sh          # build/SSHCat-<版本>.dmg + .sha256（arm64 + x86_64）
 ./scripts/release-notes.sh <版本>          # 打印该版本的 Release 正文
 swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
-./scripts/snapshot.sh [--dark]             # 临时规则 + 假 ssh，渲染界面到 build/snapshots[-dark]/
+./scripts/snapshot.sh [--dark] [--language=en|zh-Hans|zh-Hant] # 临时规则 + 假 ssh，三种语言快照
 ```
 
 图标：App 图标由 `scripts/make-icon.swift` 矢量绘制，改图后重新运行并提交生成的 `Resources/AppIcon.icns`。菜单栏图标不在资源里，而是在 `Sources/SSHCat/MenuBarIcon.swift` 中用代码绘制（模板图像，空闲为描边、有转发运行时为实心）；`MenuBarExtra` 按名字只会去 asset catalog 里找图，裸 SwiftPM 可执行文件没有它，所以不要改回按名字加载。
@@ -42,7 +42,8 @@ swift scripts/make-icon.swift              # 重新生成 Resources/AppIcon.icns
 - 【MUST】数据文件格式（`forwards.json` 等）变化须向后兼容读取旧格式并带迁移测试；偏好设置键改名同理。
 - 【SHOULD】注释解释“为什么”（约束、取舍、ssh 的行为怪癖），一眼能看懂的代码不写注释。
 - 【SHOULD】小而聚焦的改动，贴合周围代码的命名和风格；不做无关重构。
-- 界面文案使用简体中文；命令行参数、代码标识符保持英文原样。
+- 界面及核心用户文案通过 `L10n.text` / `L10n.core` 与 `Sources/SSHCatCore/Resources/{en,zh-Hans,zh-Hant}.lproj/` 管理，同时提供英语、简体中文和繁体中文；使用稳定英文语义键和完整格式字符串，不拼接翻译句子。语言名称自身可保留原生名称。命令行参数、用户数据与 SSH 原始输出不翻译。
+- 修改用户说明时同步更新 `README.md` 与 `README.en.md`，保留两者顶部的语言跳转链接。新增翻译须通过键完整性和格式参数检查。
 
 ## 安全与隐私
 

@@ -10,7 +10,18 @@ enum Entry {
         #if DEBUG
         if CommandLine.arguments.contains("--snapshot") { Snapshot.run(arguments: CommandLine.arguments) }
         #endif
+        configureLanguage(AppSettings().language)
         SSHCatApp.main()
+    }
+
+    @MainActor static func configureLanguage(_ language: AppLanguage) {
+        if language != .system {
+            // Process-only: system dialogs use the chosen language without changing global preferences.
+            var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+            arguments["AppleLanguages"] = [language.rawValue]
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
+        L10n.configure(language)
     }
 }
 
@@ -20,6 +31,7 @@ struct SSHCatApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContent()
+                .environment(\.locale, L10n.locale)
                 .environmentObject(delegate.manager)
                 .environmentObject(delegate.navigation)
         } label: {
@@ -29,6 +41,7 @@ struct SSHCatApp: App {
 
         Window("SSHCat", id: "manage") {
             ManageView()
+                .environment(\.locale, L10n.locale)
                 .environmentObject(delegate.manager)
                 .environmentObject(delegate.navigation)
         }
@@ -36,7 +49,7 @@ struct SSHCatApp: App {
         .windowToolbarStyle(.unified)
 
         Settings {
-            SettingsView().environmentObject(delegate.manager)
+            SettingsView().environmentObject(delegate.manager).environment(\.locale, L10n.locale)
         }
     }
 
@@ -63,7 +76,7 @@ final class Navigation: ObservableObject {
     }
 
     func add(_ kind: ForwardKind, using manager: ForwardManager) {
-        let rule = ForwardRule(name: kind == .dynamic ? "SOCKS 代理" : "\(kind.label)转发",
+        let rule = ForwardRule(name: kind.defaultName,
                                forwards: [PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080)])
         guard manager.add(rule) else { return }
         show(rule.id)

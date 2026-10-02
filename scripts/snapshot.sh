@@ -3,10 +3,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-OUT="build/snapshots"
+SNAPSHOT_LANGUAGE="en"
+THEME_SUFFIX=""
 for arg in "$@"; do
-  [[ "$arg" != "--dark" ]] || OUT="build/snapshots-dark"
+  case "$arg" in
+    --dark) THEME_SUFFIX="-dark" ;;
+    --language=*) SNAPSHOT_LANGUAGE="${arg#--language=}" ;;
+    *) echo "usage: scripts/snapshot.sh [--dark] [--language=en|zh-Hans|zh-Hant]" >&2; exit 64 ;;
+  esac
 done
+case "$SNAPSHOT_LANGUAGE" in
+  en|zh-Hans|zh-Hant) ;;
+  *) echo "unsupported snapshot language: $SNAPSHOT_LANGUAGE" >&2; exit 64 ;;
+esac
+OUT="build/snapshots-$SNAPSHOT_LANGUAGE$THEME_SUFFIX"
 swift build
 rm -rf "$OUT"
 .build/debug/SSHCat --snapshot "$OUT" "$@"

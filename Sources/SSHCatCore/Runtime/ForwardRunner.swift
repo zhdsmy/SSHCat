@@ -22,7 +22,7 @@ public enum LaunchError: Error, Equatable, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .binaryNotFound: return "找不到 ssh，请在设置里指定路径"
+        case .binaryNotFound: return L10n.core("runtime.binary_missing")
         }
     }
 }
@@ -119,7 +119,7 @@ public final class ForwardRunner: ObservableObject, Identifiable {
 
     public func restart(reason: String) {
         guard state.isActive else { return }
-        appendLog("# \(reason)，重启")
+        appendLog(L10n.core("runtime.restarting", reason))
         stop()
         start()
     }
@@ -129,7 +129,7 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         let relaunch = newRule.user != rule.user || newRule.host != rule.host || newRule.port != rule.port
             || newRule.identityFile != rule.identityFile || newRule.forwards != rule.forwards
         rule = newRule
-        if relaunch, state.isActive { restart(reason: "配置已修改") }
+        if relaunch, state.isActive { restart(reason: L10n.core("runtime.configuration_changed")) }
     }
 
     /// Blocking stop for app quit, when no scheduled work will get a chance to run.
@@ -160,12 +160,12 @@ public final class ForwardRunner: ObservableObject, Identifiable {
             guard isCurrent(gen) else { return }
 
             let reason = describe(outcome)
-            appendLog("# 进程退出：\(reason)")
+            appendLog(L10n.core("runtime.process_exited", reason))
 
             if outcome.launchFailed || SSHFailure.isPermanent(outcome.tail) || !rule.autoRestart {
                 setState(gen, .failed(reason: reason))
                 let hint = SSHFailure.hint(for: reason).map { "\n\($0)" } ?? ""
-                onNotify?(rule.name, "转发失败：\(reason)\(hint)")
+                onNotify?(rule.name, L10n.core("notification.failed", reason, hint))
                 return
             }
 
@@ -176,7 +176,7 @@ public final class ForwardRunner: ObservableObject, Identifiable {
                                         retryAt: Date().addingTimeInterval(delay),
                                         reason: reason))
             if attempt == 3 || attempt == 8 {
-                onNotify?(rule.name, "正在重连（第 \(attempt) 次）：\(reason)")
+                onNotify?(rule.name, L10n.core("notification.reconnecting", attempt, reason))
             }
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -191,9 +191,9 @@ public final class ForwardRunner: ObservableObject, Identifiable {
     }
 
     private func describe(_ outcome: Outcome) -> String {
-        if let error = outcome.launchError { return "无法启动：\(error)" }
+        if let error = outcome.launchError { return L10n.core("runtime.launch_failed", error) }
         if let last = outcome.tail.last(where: { !$0.isEmpty && !SSHLog.isInformational($0) }) { return last }
-        return "退出码 \(outcome.status.map(String.init) ?? "?")"
+        return L10n.core("runtime.exit_status", outcome.status.map(String.init) ?? "?")
     }
 
     private func runOnce(gen: Int, spec: LaunchSpec) async -> Outcome {

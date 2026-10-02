@@ -21,13 +21,14 @@ let testingMacroFlags: [SwiftSetting] = {
 
 let package = Package(
     name: "SSHCat",
+    defaultLocalization: "en",
     platforms: [.macOS(.v13)],
     products: [
         .executable(name: "SSHCat", targets: ["SSHCat"]),
     ],
     targets: [
         // Rules, argv, and the ssh process supervisor. No SwiftUI, so it can be unit-tested.
-        .target(name: "SSHCatCore"),
+        .target(name: "SSHCatCore", resources: [.process("Resources")]),
         .executableTarget(name: "SSHCat", dependencies: ["SSHCatCore"]),
         .testTarget(name: "SSHCatCoreTests", dependencies: ["SSHCatCore"], swiftSettings: testingMacroFlags),
     ]

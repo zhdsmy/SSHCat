@@ -17,7 +17,7 @@ public final class SystemEvents {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.fire("系统唤醒", after: interval, onChange) }
+            MainActor.assumeIsolated { self?.fire(L10n.core("system.wake"), after: interval, onChange) }
         }
 
         monitor.pathUpdateHandler = { [weak self] path in
@@ -27,7 +27,7 @@ public final class SystemEvents {
                 defer { self.lastSignature = signature }
                 guard let previous = self.lastSignature, previous != signature,
                       path.status == .satisfied else { return }
-                self.fire("网络变化", after: interval, onChange)
+                self.fire(L10n.core("system.network_changed"), after: interval, onChange)
             }
         }
         monitor.start(queue: DispatchQueue(label: "sshcat.netmonitor"))
