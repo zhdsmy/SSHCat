@@ -38,9 +38,12 @@
 "validation.bind_invalid" = "Invalid bind address: %@";
 "validation.forward_port_invalid" = "Invalid forward port: %@ (must be 1–65535)";
 "validation.forwards_empty" = "Add at least one forward.";
-"validation.host_invalid" = "Enter a host without spaces, @ or colons. It must not start with -.";
+"validation.host_invalid" = "Enter a host alias, hostname, or IPv6 address without spaces or @. It must not start with -; enter the SSH port separately.";
 "validation.identity_invalid" = "The key path must be absolute and contain no line breaks.";
 "validation.name_empty" = "Enter a name.";
 "validation.port_invalid" = "The port must be between 1 and 65535.";
 "validation.target_invalid" = "Invalid target address: %@";
 "validation.user_invalid" = "The username must not contain spaces or @, or start with -.";
+"runtime.manual_retry" = "Manual retry";
+"import.too_large" = "Import files can contain up to 8 MB and 1,000 rules.";
+"import.invalid_rule" = "Rule “%@” is invalid: %@";

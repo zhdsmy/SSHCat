@@ -65,12 +65,14 @@ final class Navigation: ObservableObject {
     @Published var selection: UUID?
     @Published var showingGuide = false
     @Published var searchText = ""
+    @Published var filter: RuleFilter = .all
     /// Unsaved edits by rule. Kept here, not in the editor, so switching rules or closing the
     /// window does not throw them away.
     @Published var drafts: [UUID: RuleDraft] = [:]
 
     func show(_ id: UUID) {
         searchText = ""
+        filter = .all
         showingGuide = false
         selection = id
     }
@@ -83,23 +85,23 @@ final class Navigation: ObservableObject {
     }
 }
 
-struct RuleDraft: Equatable {
-    var rule: ForwardRule
-    /// The port field as typed; it may not parse yet.
-    var portText: String
-}
-
 /// Owns the one `ForwardManager` the scenes display.
 ///
 /// `App.init` runs before SwiftUI installs `@StateObject` storage. Creating the manager here,
 /// in the delegate, keeps the menu and the window on the same instance.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, UNUserNotificationCenterDelegate {
-    let manager = ForwardManager()
-    let navigation = Navigation()
+    let manager: ForwardManager
+    let navigation: Navigation
     private var runnerObserver: AnyCancellable?
 
-    override init() {
+    override convenience init() {
+        self.init(manager: ForwardManager(), navigation: Navigation())
+    }
+
+    init(manager: ForwardManager, navigation: Navigation) {
+        self.manager = manager
+        self.navigation = navigation
         super.init()
         runnerObserver = manager.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -118,6 +120,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, UNUs
 
     nonisolated func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { manager.shutdown() }
+    }
+
+    nonisolated func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            sender.keyWindow?.makeFirstResponder(nil)
+            let unsaved = manager.rules.filter { navigation.drafts[$0.id]?.isDirty(comparedTo: $0) == true }
+            guard !unsaved.isEmpty else { return .terminateNow }
+            let alert = QuitConfirmation.alert(ruleNames: unsaved.map(\.name))
+            guard alert.runModal() == .alertSecondButtonReturn else {
+                navigation.show(unsaved[0].id)
+                sender.windows.first { $0.title == "SSHCat" }?.makeKeyAndOrderFront(nil)
+                return .terminateCancel
+            }
+            return .terminateNow
+        }
     }
 
     /// A menu bar app counts as frontmost while its window is open; show banners anyway.

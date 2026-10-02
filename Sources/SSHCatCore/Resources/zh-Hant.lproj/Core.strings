@@ -38,9 +38,12 @@
 "validation.bind_invalid" = "綁定位址無效：%@";
 "validation.forward_port_invalid" = "轉發連接埠無效：%@（應為 1–65535）";
 "validation.forwards_empty" = "至少需要一條轉發";
-"validation.host_invalid" = "主機不能為空，不能含空白、@ 或冒號，也不能以 - 開頭";
+"validation.host_invalid" = "請輸入主機別名、主機名稱或 IPv6 位址，不可含空白、@ 或以 - 開頭；SSH 連接埠請另行填寫。";
 "validation.identity_invalid" = "金鑰必須使用絕對路徑，不能含換行";
 "validation.name_empty" = "名稱不能為空";
 "validation.port_invalid" = "連接埠應為 1–65535";
 "validation.target_invalid" = "目標位址無效：%@";
 "validation.user_invalid" = "使用者名稱不能含空白或 @，也不能以 - 開頭";
+"runtime.manual_retry" = "手動重試";
+"import.too_large" = "匯入檔案上限為 8 MB、1000 條規則。";
+"import.invalid_rule" = "規則「%@」無效：%@";

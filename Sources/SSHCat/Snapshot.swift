@@ -77,6 +77,8 @@ enum Snapshot {
         }
         assert(manager.runner(id: rules[0].id)?.state == .running)
         assert(manager.runner(id: rules[3].id)?.state == .failed(reason: "Host key verification failed."))
+        try await renderer.checkPortEditing(rule: rules[0], other: rules[1])
+        renderer.checkQuitProtection(rule: rules[0])
         navigation.selection = rules[0].id
         try await renderer.page("menu", MenuContent())
         try await renderer.page("manage", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 700))
@@ -91,6 +93,20 @@ enum Snapshot {
         navigation.show(draft.id)
         try await renderer.page("draft", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 700))
         navigation.drafts[draft.id] = nil
+        var invalidPorts = RuleDraft(rule: rules[0])
+        invalidPorts.ports[rules[0].forwards[0].id]?.bind = ""
+        invalidPorts.ports[rules[0].forwards[0].id]?.target = "70000"
+        navigation.drafts[rules[0].id] = invalidPorts
+        navigation.show(rules[0].id)
+        try await renderer.page("port-validation", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 700))
+        navigation.drafts[rules[0].id] = nil
+        navigation.filter = .failed
+        try await renderer.page("filter-failed", MenuContent())
+        navigation.filter = .all
+        try await renderer.page("host-picker", HostPicker(hosts: ["devbox", "gateway", "lab-v6"], refresh: {}, select: { _ in }))
+        try await renderer.page("import-preview", ImportPreview(rules: [rules[0],
+            ForwardRule(name: "New Project", host: "newbox", forwards: [PortForward(bindPort: 9090)])]))
+        try renderer.quitPrompt(names: [rules[0].name, rules[1].name])
         navigation.searchText = "1080"
         try await renderer.page("search", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 700))
         navigation.searchText = "no-matching-rule"
@@ -104,6 +120,9 @@ enum Snapshot {
         try await renderer.page("settings", SettingsView(settings: settings, snapshotMode: true),
                                 size: CGSize(width: 520, height: 680))
         try await renderer.page("update-available", SettingsView(settings: settings, snapshotMode: true, update: .available("v0.2.0")),
+                                size: CGSize(width: 520, height: 680))
+        try await renderer.page("permissions", SettingsView(settings: settings, snapshotMode: true,
+                                                           notificationStatus: .denied, loginStatus: .requiresApproval),
                                 size: CGSize(width: 520, height: 680))
         var long = rules[2]
         long.name = "Demo Environment · " + String(repeating: "Long-running Port Forward ", count: 8)
@@ -168,6 +187,93 @@ private final class SnapshotRenderer {
         self.output = output
         self.manager = manager
         self.navigation = navigation
+    }
+
+    /// Drive AppKit's field editor in the same isolated process; no real app state or SSH is used.
+    func checkPortEditing(rule: ForwardRule, other: ForwardRule) async throws {
+        navigation.show(rule.id)
+        let host = NSHostingView(rootView: ManageView(snapshotMode: true)
+            .environmentObject(manager).environmentObject(navigation).environment(\.locale, L10n.locale))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 900, height: 700),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close(); navigation.drafts[rule.id] = nil; navigation.show(rule.id) }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        host.layoutSubtreeIfNeeded()
+        guard let field = textFields(in: host).first(where: { $0.stringValue == "8080" }) else {
+            throw SnapshotCheck.failed("Port text field not found")
+        }
+        for value in ["", "invalid", "65536", "8081"] {
+            window.makeFirstResponder(field)
+            guard let editor = field.currentEditor() as? NSTextView else { throw SnapshotCheck.failed("No field editor") }
+            editor.selectAll(nil)
+            editor.insertText(value, replacementRange: NSRange(location: 0, length: (editor.string as NSString).length))
+            editor.didChangeText()
+            window.makeFirstResponder(nil)
+            try await Task.sleep(nanoseconds: 100_000_000)
+            guard navigation.drafts[rule.id]?.ports[rule.forwards[0].id]?.bind == value else {
+                throw SnapshotCheck.failed("Port input was not preserved: \(value)")
+            }
+        }
+        navigation.show(other.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        navigation.show(rule.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        guard textFields(in: host).contains(where: { $0.stringValue == "8081" }) else {
+            throw SnapshotCheck.failed("Port draft was lost when switching rules")
+        }
+        print("Isolated port editing and draft restoration passed")
+    }
+
+    private enum SnapshotCheck: Error { case failed(String) }
+
+    func checkQuitProtection(rule: ForwardRule) {
+        let delegate = AppDelegate(manager: manager, navigation: navigation)
+        assert(delegate.applicationShouldTerminate(NSApp) == .terminateNow)
+        var draft = RuleDraft(rule: rule)
+        draft.rule.name += " Draft"
+        navigation.drafts[rule.id] = draft
+        defer { navigation.drafts[rule.id] = nil }
+        answerQuitPrompt(.alertFirstButtonReturn)
+        assert(delegate.applicationShouldTerminate(NSApp) == .terminateCancel)
+        assert(navigation.drafts[rule.id] == draft && manager.runner(id: rule.id)?.state == .running)
+        answerQuitPrompt(.alertSecondButtonReturn)
+        assert(delegate.applicationShouldTerminate(NSApp) == .terminateNow)
+        print("Isolated quit cancellation and discard checks passed")
+    }
+
+    private func answerQuitPrompt(_ response: NSApplication.ModalResponse) {
+        // The native alert runs a nested modal loop, which does not drain the main dispatch queue.
+        let timer = Timer(timeInterval: 0.2, repeats: false) { _ in NSApp.stopModal(withCode: response) }
+        RunLoop.main.add(timer, forMode: .modalPanel)
+    }
+
+    func quitPrompt(names: [String]) throws {
+        let alert = QuitConfirmation.alert(ruleNames: names)
+        alert.icon = NSImage(contentsOfFile: "Resources/AppIcon.icns")
+        alert.layout()
+        guard let view = alert.window.contentView,
+              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            throw SnapshotCheck.failed("Quit prompt could not be rendered")
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        // NSVisualEffectView caches with a transparent background; flatten it for a readable PNG.
+        alert.window.effectiveAppearance.performAsCurrentDrawingAppearance {
+            context.cgContext.setBlendMode(.destinationOver)
+            context.cgContext.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh))
+        }
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw SnapshotCheck.failed("Quit prompt PNG could not be encoded")
+        }
+        try png.write(to: output.appendingPathComponent("quit-unsaved.png"))
+        print("quit-unsaved.png")
+    }
+
+    private func textFields(in view: NSView) -> [NSTextField] {
+        ((view as? NSTextField).map { [$0] } ?? []) + view.subviews.flatMap { textFields(in: $0) }
     }
 
     func page<V: View>(_ name: String, _ view: V, size: CGSize? = nil, scale: CGFloat = 1) async throws {

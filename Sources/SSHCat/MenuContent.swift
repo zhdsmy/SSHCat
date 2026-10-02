@@ -16,6 +16,7 @@ struct MenuContent: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
+            if !manager.runners.isEmpty { RuleFilterPicker().padding(.horizontal, 12).padding(.bottom, 8) }
             if manager.binaryPath == nil {
                 Text(L10n.text("menu.binary_missing"))
                     .font(.caption).foregroundStyle(.red).padding(.horizontal, 12).padding(.bottom, 8)
@@ -68,7 +69,11 @@ struct MenuContent: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true).padding(12)
             }
-            ForEach(manager.runners) { runner in
+            let visible = manager.runners.filter { navigation.filter.includes($0.state) }
+            if visible.isEmpty && !manager.runners.isEmpty {
+                Text(L10n.text("manage.no_matches")).font(.callout).foregroundStyle(.secondary).padding(12)
+            }
+            ForEach(visible) { runner in
                 MenuRow(runner: runner) { show(runner.id) }
             }
         }
@@ -98,6 +103,9 @@ private struct MenuRow: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     .help(runner.rule.destination)
                 if !incomplete {
+                    Text(runner.rule.forwards.map(\.summary).joined(separator: " · "))
+                        .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        .help(runner.rule.forwards.map(\.summary).joined(separator: "\n"))
                     Text(runner.state.label)
                         .font(.caption).foregroundStyle(runner.state.color).lineLimit(2)
                         .help(runner.state.reason ?? runner.state.label)
@@ -107,6 +115,11 @@ private struct MenuRow: View {
                 }
             }
             Spacer(minLength: 4)
+            if runner.state.reason != nil {
+                Button { manager.retry(id: runner.id) } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).disabled(hasDraft || incomplete)
+                    .help(L10n.text("action.retry")).accessibilityLabel(L10n.text("action.retry"))
+            }
             if let endpoint = localEndpoints {
                 CopyButton(text: endpoint, label: L10n.text("action.copy_address"), iconOnly: true)
                     .buttonStyle(.borderless)
