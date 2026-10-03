@@ -11,7 +11,9 @@ public enum Diagnostics {
         state: String,
         log: [String],
         date: Date = Date(),
-        home: String = NSHomeDirectory()
+        home: String = NSHomeDirectory(),
+        identityAgent: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
         var lines = [
             L10n.core("diagnostics.title"),
@@ -22,6 +24,11 @@ public enum Diagnostics {
             L10n.core("diagnostics.rule", rule.name),
             L10n.core("diagnostics.state", state),
             L10n.core("diagnostics.command", commandLine),
+            L10n.core("diagnostics.agent_override", identityAgent ?? L10n.core("diagnostics.agent_inherited")),
+            L10n.core("diagnostics.agent_environment", environment["SSH_AUTH_SOCK"].flatMap { path in
+                path.isEmpty ? nil : L10n.core("diagnostics.agent_socket", path,
+                                             FileManager.default.fileExists(atPath: path) ? L10n.core("diagnostics.present") : L10n.core("diagnostics.missing"))
+            } ?? L10n.core("diagnostics.unset")),
             "",
             L10n.core("diagnostics.recent_log"),
         ]

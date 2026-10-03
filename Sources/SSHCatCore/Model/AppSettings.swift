@@ -9,6 +9,26 @@ public struct AppSettings: @unchecked Sendable {
         public static let customBinaryPath = "customBinaryPath"
         public static let notificationsEnabled = "notificationsEnabled"
         public static let language = "language"
+        public static let identityAgent = "identityAgent"
+    }
+
+    /// An unset override preserves each Host's IdentityAgent and the inherited environment.
+    public var identityAgent: String? {
+        get { defaults.string(forKey: Key.identityAgent).flatMap { $0.isEmpty ? nil : $0 } }
+        nonmutating set {
+            let value = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if value.isEmpty { defaults.removeObject(forKey: Key.identityAgent) }
+            else { defaults.set(value, forKey: Key.identityAgent) }
+        }
+    }
+
+    public static func validatedIdentityAgent(_ raw: String?) throws -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        guard !SSHToken.containsControl(raw) else { throw ForwardIssue.invalidAgent }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return nil }
+        guard value.hasPrefix("/") else { throw ForwardIssue.invalidAgent }
+        return value
     }
 
     private let defaults: UserDefaults

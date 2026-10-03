@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 从 SSH 日志记录近期目标转发失败，能唯一定位的远程目标显示在对应行旁，其余显示规则级提示，不额外探测或重启会话。
+- 细分主机密钥变更与未知密钥、密钥过多、连接拒绝、超时和远程监听失败；保留失败上下文，密钥变更提供经实际配置生成的可复制清理命令。
+- 手动 `ssh -G` 配置预览，显示实际主机、用户、端口、代理、密钥与额外转发，限制读取时间及输出大小，并提示 `Match exec` 的执行行为。
+- 全局 IdentityAgent socket 设置及 SSH_AUTH_SOCK 诊断，下一次连接生效，不打断运行中的会话。
+- 独立反向 SOCKS 类型，连接前检查 OpenSSH 7.6+，提示 OpenSSH 8.5+ 的 PermitRemoteOpen 目标限制；兼容读取旧规则。
+
+### English
+
+- Record observed forwarding failures without probe connections or SSH restarts, attributing only unambiguous remote targets.
+- Retain failure context and show specific host-key, authentication, timeout, connection-refusal and remote-listener guidance, with a manually copied host-key removal command.
+- Preview effective SSH configuration with bounded, explicitly requested ssh -G reads and warnings about Match exec and inherited forwards.
+- Configure a global IdentityAgent socket and include SSH_AUTH_SOCK in diagnostics; apply on the next connection.
+- Add explicit remote SOCKS forwarding with client version checks and PermitRemoteOpen guidance while retaining old rule compatibility.
+
 ## [0.3.1] - 2026-10-03
 
 ### 修复

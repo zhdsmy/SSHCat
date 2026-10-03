@@ -113,6 +113,10 @@ private struct MenuRow: View {
                 if hasDraft {
                     Text(L10n.text("menu.unsaved")).font(.caption).foregroundStyle(.orange)
                 }
+                if runner.unattributedTargetFailure != nil || !runner.targetFailures.isEmpty {
+                    Label(L10n.text("target.recent_failure"), systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
             Spacer(minLength: 4)
             if runner.state.reason != nil {

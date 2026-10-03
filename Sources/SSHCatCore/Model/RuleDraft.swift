@@ -35,7 +35,7 @@ public struct RuleDraft: Equatable, Sendable {
             let text = portDraft(forward)
             if !SSHToken.isAddress(forward.bindAddress) { result.append((.bindAddress(forward.id), .invalidBind(forward.bindAddress))) }
             if !validPort(text.bind) { result.append((.bindPort(forward.id), .invalidPort)) }
-            if forward.kind != .dynamic {
+            if forward.kind.hasTarget {
                 if !SSHToken.isAddress(forward.targetHost) { result.append((.targetHost(forward.id), .invalidTarget(forward.targetHost))) }
                 if !validPort(text.target) { result.append((.targetPort(forward.id), .invalidPort)) }
             }
@@ -86,13 +86,16 @@ public struct RuleDraft: Equatable, Sendable {
 
 extension ForwardRule {
     /// Copied for a human to run in Terminal; the app never executes this interactive command.
-    public func firstConnectionCommand(executable: String) throws -> String {
+    public func firstConnectionCommand(executable: String, identityAgent: String? = nil) throws -> String {
         guard SSHToken.isHost(host) else { throw ForwardIssue.invalidHost }
         guard SSHToken.isUser(user) else { throw ForwardIssue.invalidUser }
         if let port, !SSHToken.isPort(port) { throw ForwardIssue.invalidPort }
         guard SSHToken.isIdentity(identityFile) else { throw ForwardIssue.invalidIdentity }
         var args = [executable, "-o", "BatchMode=no", "-o", "StrictHostKeyChecking=ask",
                     "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ClearAllForwardings=yes"]
+        if let agent = try AppSettings.validatedIdentityAgent(identityAgent) {
+            args += ["-o", "IdentityAgent=\(SSHToken.quotedOptionValue(agent))"]
+        }
         if let port { args += ["-p", String(port)] }
         let identity = identityFile.trimmingCharacters(in: .whitespacesAndNewlines)
         if !identity.isEmpty { args += ["-i", identity, "-o", "IdentitiesOnly=yes"] }

@@ -222,6 +222,7 @@ private struct RuleEditor: View {
     @ViewState private var choosingHost = false
     @ViewState private var confirmDelete = false
     @ViewState private var showLog = false
+    @ViewState private var configurationRequest: SSHConfigurationRequest?
 
     /// `saved` is an unsaved draft from an earlier visit to this rule.
     init(runner: ForwardRunner, hosts: Binding<[String]>, saved: RuleDraft?, snapshotMode: Bool = false) {
@@ -241,8 +242,9 @@ private struct RuleEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if runner.state.reason != nil {
-                        StateDetail(state: runner.state)
+                        StateDetail(state: runner.state, failure: runner.failure, hostKeyRemovalCommand: runner.hostKeyRemovalCommand)
                         firstConnectionButton
+                        if runner.failure == .hostKeyChanged { configurationButton }
                     }
                     GroupBox { targetSection.padding(8) }
                     GroupBox { forwardsSection.padding(8) }
@@ -261,6 +263,9 @@ private struct RuleEditor: View {
             draft = rule
             portText = rule.port.map(String.init) ?? ""
             ports = RuleDraft(rule: rule).ports
+        }
+        .sheet(item: $configurationRequest) { request in
+            SSHConfigurationView(request: request, snapshotMode: snapshotMode)
         }
         .confirmationDialog(L10n.text("editor.confirm_delete"), isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L10n.text("action.delete"), role: .destructive) {
@@ -384,7 +389,7 @@ private struct RuleEditor: View {
                 Menu(L10n.text("action.add")) {
                     ForEach(ForwardKind.allCases, id: \.self) { kind in
                         Button(kind.defaultName) {
-                            draft.forwards.append(PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080))
+                            draft.forwards.append(PortForward(kind: kind, bindPort: kind.defaultPort))
                         }
                     }
                 }.fixedSize()
@@ -396,7 +401,8 @@ private struct RuleEditor: View {
                 ForwardRow(forward: $forward, ports: Binding(
                     get: { editing.portDraft(forward) },
                     set: { ports[forward.id] = $0 }
-                ), issues: editing.issues) {
+                ), issues: editing.issues,
+                   failure: runner.rule.forwards.first(where: { $0.id == forward.id }) == forward ? runner.targetFailures[forward.id] : nil) {
                     draft.forwards.removeAll { $0.id == forward.id }
                     ports[forward.id] = nil
                 }
@@ -415,6 +421,14 @@ private struct RuleEditor: View {
     private var runSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.text("action.run")).font(.headline)
+            if let failure = runner.unattributedTargetFailure {
+                TargetFailureNotice(failure: failure)
+            }
+            if runner.unattributedTargetFailure != nil || !runner.targetFailures.isEmpty {
+                Button { runner.clearTargetFailures() } label: {
+                    Label(L10n.text("target.clear"), systemImage: "xmark.circle")
+                }.buttonStyle(.link)
+            }
             Toggle(L10n.text("editor.auto_restart"), isOn: $draft.autoRestart)
             Toggle(L10n.text("editor.auto_start"), isOn: $draft.autoStart)
 
@@ -429,6 +443,10 @@ private struct RuleEditor: View {
             Text(L10n.text("editor.running_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            configurationButton
+            if runner.failure == .hostKeyChanged {
+                Text(L10n.text("configuration.key_repair_hint")).font(.caption).foregroundStyle(.red)
+            }
             DisclosureGroup(L10n.text("editor.command")) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(commandText)
@@ -466,8 +484,21 @@ private struct RuleEditor: View {
 
     private let logEnd = "log-end"
 
+    private var configurationButton: some View {
+        Button {
+            guard let rule = parsedRule else { return }
+            configurationRequest = SSHConfigurationRequest(rule: rule, executable: URL(fileURLWithPath: executable),
+                identityAgent: identityAgent,
+                knownHostsFile: !isDirty && runner.failure == .hostKeyChanged ? runner.offendingKnownHostsFile : nil,
+                hostKeyRemovalCommand: !isDirty && runner.failure == .hostKeyChanged ? runner.hostKeyRemovalCommand : nil,
+                sshVersion: manager.sshVersion)
+        } label: {
+            Label(L10n.text("configuration.title"), systemImage: "doc.text.magnifyingglass")
+        }.disabled(parsedRule == nil)
+    }
+
     @ViewBuilder private var firstConnectionButton: some View {
-        if let command = try? runner.rule.firstConnectionCommand(executable: executable) {
+        if let command = try? runner.rule.firstConnectionCommand(executable: executable, identityAgent: identityAgent) {
             CopyButton(text: command, label: L10n.text("action.copy_first_connection"))
                 .help(L10n.text("editor.first_connection_hint"))
         }
@@ -478,17 +509,20 @@ private struct RuleEditor: View {
             appVersion: appVersion,
             sshVersion: manager.sshVersion,
             rule: runner.rule,
-            commandLine: runner.rule.commandLine(executable: executable),
+            commandLine: runner.rule.commandLine(executable: executable, identityAgent: identityAgent),
             state: [runner.state.label, runner.state.reason].compactMap { $0 }.joined(separator: " · "),
-            log: runner.log
+            log: runner.log,
+            identityAgent: identityAgent,
+            environment: snapshotMode ? [:] : ProcessInfo.processInfo.environment
         )
     }
 
     private var executable: String { snapshotMode ? "/usr/bin/ssh" : manager.binaryPath ?? "/usr/bin/ssh" }
+    private var identityAgent: String? { snapshotMode ? nil : AppSettings().identityAgent }
 
     private var commandText: String {
         guard let rule = parsedRule else { return L10n.core("rule.command_unavailable") }
-        return rule.commandLine(executable: executable)
+        return rule.commandLine(executable: executable, identityAgent: identityAgent)
     }
 
     private var parsedRule: ForwardRule? {
@@ -546,6 +580,7 @@ private struct ForwardRow: View {
     @Binding var forward: PortForward
     @Binding var ports: RuleDraft.Ports
     let issues: [(field: RuleField, issue: ForwardIssue)]
+    var failure: SSHForwardFailure? = nil
     let onDelete: () -> Void
 
     var body: some View {
@@ -556,13 +591,14 @@ private struct ForwardRow: View {
                         Text(kind.label).tag(kind)
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
+                .pickerStyle(.menu)
+                .frame(maxWidth: 300)
                 Spacer()
-                Button(L10n.text("action.delete"), action: onDelete)
+                Button(action: onDelete) { Image(systemName: "trash") }
+                    .help(L10n.text("action.delete")).accessibilityLabel(L10n.text("action.delete"))
             }
             HStack {
-                Text(forward.kind == .remote ? L10n.text("forward.remote_listener") : L10n.text("forward.local_listener")).font(.caption).frame(width: 90, alignment: .leading)
+                Text(forward.kind.isRemote ? L10n.text("forward.remote_listener") : L10n.text("forward.local_listener")).font(.caption).frame(width: 90, alignment: .leading)
                 TextField(L10n.text("forward.bind_address"), text: $forward.bindAddress)
                     .textFieldStyle(.roundedBorder)
                 TextField(L10n.text("editor.port"), text: $ports.bind)
@@ -571,7 +607,7 @@ private struct ForwardRow: View {
             }
             FieldError(issue: issues.first { $0.field == .bindAddress(forward.id) }?.issue)
             FieldError(issue: issues.first { $0.field == .bindPort(forward.id) }?.issue)
-            if forward.kind != .dynamic {
+            if forward.kind.hasTarget {
                 HStack {
                     Text(forward.kind == .local ? L10n.text("forward.remote_target") : L10n.text("forward.local_target")).font(.caption).frame(width: 90, alignment: .leading)
                     TextField(forward.kind == .local ? L10n.text("forward.remote_target_host") : L10n.text("forward.local_target_host"), text: $forward.targetHost)
@@ -581,13 +617,14 @@ private struct ForwardRow: View {
                         .frame(width: 90)
                 }
             }
-            if forward.kind != .dynamic {
+            if forward.kind.hasTarget {
                 FieldError(issue: issues.first { $0.field == .targetHost(forward.id) }?.issue)
                 FieldError(issue: issues.first { $0.field == .targetPort(forward.id) }?.issue)
             }
             Text(hint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let failure { TargetFailureNotice(failure: failure) }
             if forward.needsGatewayPorts {
                 Text(L10n.text("forward.gateway_ports"))
                     .font(.caption)
@@ -604,6 +641,7 @@ private struct ForwardRow: View {
         case .local: return L10n.text("forward.local_hint")
         case .remote: return L10n.text("forward.remote_hint")
         case .dynamic: return L10n.text("forward.dynamic_hint")
+        case .remoteDynamic: return L10n.text("forward.remote_dynamic_hint")
         }
     }
 }

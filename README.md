@@ -59,7 +59,7 @@ Safe UI snapshots:
 ./scripts/snapshot.sh --language=zh-Hant --dark
 ```
 
-Snapshots are available only in debug builds. They use temporary rules, isolated preferences, and `/bin/sh` as fake SSH. They do not read real rules or `~/.ssh/config`, change login items, or establish real SSH connections. Images are written to `build/snapshots-<language>[-dark]/`; English is the default.
+Snapshots are available only in debug builds. They use temporary rules, isolated preferences, and `/bin/sh` as fake SSH. They do not read real rules or `~/.ssh/config`, change login items, or establish real SSH connections. Images are written to `build/snapshots-<language>[-dark]/`; English is the default. Set `SSH_CAT_SCRATCH_PATH` and `SSH_CAT_SNAPSHOT_ROOT` to use temporary build and image directories. Scenarios include target failures, changed host keys, remote SOCKS and effective-configuration previews.
 
 The scenes also cover field errors, state filters, the host picker, import preview, quit confirmation, and system permission states. The isolated harness checks actual port text editing, draft restoration after switching rules, both quit-confirmation outcomes, and first/subsequent import sheets after cancellation. Scrollable pages produce additional `-scroll-N` images. Snapshots exclude title bars and toolbars and do not replace full interaction testing of native file dialogs or System Settings. Switches in unfocused windows may look gray. Sample rule names stay the same across languages for comparison.
 
@@ -73,13 +73,14 @@ A plain `swift build` executable is not an app bundle and may show a Dock icon. 
 
 ## Create a forward
 
-1. Choose **New Forward** in the menu bar and select a local forward, remote forward, or SOCKS proxy. You can also use the management window's add menu or the built-in guide.
+1. Choose **New Forward** in the menu bar and select a local forward, remote forward, local SOCKS proxy, or remote SOCKS proxy. You can also use the management window's add menu or the built-in guide.
 2. Enter a `Host` alias from `~/.ssh/config`, a hostname, or an IP address. The host picker supports search and refresh, including aliases in `Include` files. Leave user, port, and key blank to use that host's SSH configuration, including `ProxyJump`.
 3. Set a port (`-p`) or an identity file (`-i`, with `IdentitiesOnly=yes`) only when you need an override.
 4. Add one or more forwards:
    - **Local:** a local listening address and port forward to a destination reachable from the SSH server.
    - **Remote:** an address and port on the SSH server forward to a destination reachable from your Mac. Listening on a non-loopback address requires `GatewayPorts` on the server.
    - **Dynamic:** a local SOCKS proxy.
+   - **Remote SOCKS:** a SOCKS listener on the SSH server whose destinations are reached from your Mac (`-R address:port`, without a fixed target). Requires an OpenSSH 7.6+ client; SSHCat checks the selected binary before connecting.
 5. Choose **Save and Connect**, or save and turn on the rule. Turning it off releases its listeners. Closing the management window leaves forwards running; quitting SSHCat stops the processes it owns.
 
 Search rules by name, host, or port, and filter the menu or sidebar to running or failed rules. The menu shows forwarding endpoints; listener-conflict warnings identify the affected rules. **Create Copy** in the **…** menu copies the saved configuration with new IDs and automatic startup disabled. Choose another listening port to avoid conflicting with the original rule.
@@ -107,6 +108,26 @@ ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
 `ControlMaster=no` keeps the connection under the app's ownership, so stopping a rule stops its forward. `ServerAlive*` lets a broken session exit so it can reconnect with backoff. `ExitOnForwardFailure=yes` prevents failed listeners from appearing to work. `ConnectTimeout=10` bounds connection setup, and `LogLevel=VERBOSE` reports authentication progress. SSHCat uses the authentication message to detect a running session, with a delayed fallback for SSH builds that log differently.
 
 The equivalent command can be copied, but SSHCat itself always launches SSH using an argument array, never through a shell.
+
+## SSH troubleshooting
+
+SSHCat records failed forwarding attempts from SSH's existing logs without making probe connections. A remote `connect_to` error is shown beside a forward only when its target matches exactly one saved remote forward. Channel errors that omit an endpoint appear at rule level, including local and SOCKS errors. These warnings describe a past attempt, not continuous service health: no warning does not prove reachability, and later success may not be logged. Clear them manually; reconnecting also clears them. Target errors do not restart the SSH session.
+
+Failure hints distinguish unknown and changed host keys, excessive agent keys, refused connections, timeouts, and remote listener failures. A remote listener may be held by an old sshd session or blocked by server forwarding policy; it remains eligible for backoff retries. A changed host key is a prominent warning. Verify the new fingerprint with the server administrator before removing any trusted entry.
+
+Choose **Effective SSH Configuration**, then **Read Configuration**, to run `ssh -G` using the selected executable, current editor values, and the same command-line overrides as a connection. It shows User, HostName, Port, ProxyJump, IdentityFile, IdentityAgent and all effective forwards. Additional forwards inherited from SSH config are highlighted because their listener conflicts can fail the entire rule. Reading does not establish an SSH session, but **SSH config's `Match exec` commands may execute**. Reads are limited to five seconds and 256 KiB; closing the preview cancels its SSH process. For changed keys, SSHCat reconstructs a quoted `ssh-keygen -f ... -R ...` command from SSH's own removal suggestion, retaining the correct jump host when applicable. If no suggestion was logged, the preview can generate one from the offending file and effective HostName/HostKeyAlias and port for a direct connection. It does not guess which host failed on a proxy connection. SSHCat only copies the command; it does not execute it or edit trusted keys.
+
+GUI apps do not inherit `.zshrc` exports. For 1Password, Secretive or another agent, set an absolute **Agent socket path** in Settings, or configure `IdentityAgent` under the relevant Host in `~/.ssh/config`. The global setting overrides every Host's IdentityAgent; leave it blank to preserve SSH configuration and `SSH_AUTH_SOCK`. Changes apply to the next connection and do not interrupt existing sessions. Equivalent commands and first-connection commands include the override. Copied diagnostics show the override, whether `SSH_AUTH_SOCK` is set and whether its path exists; path existence does not prove an agent is responding.
+
+Remote SOCKS grants the server access through your Mac's network. Keep its listener on loopback and restrict destinations with the client-side `PermitRemoteOpen` option, which requires OpenSSH 8.5+. For example:
+
+```sshconfig
+Host devbox
+    IdentityAgent "/Users/me/Agent Sockets/agent.sock"
+    PermitRemoteOpen service.internal:443 192.168.1.10:5432
+```
+
+Existing v1 rules continue to load unchanged. Archives containing the new remote SOCKS type require a version of SSHCat that supports it.
 
 ## Import, export, and system permissions
 

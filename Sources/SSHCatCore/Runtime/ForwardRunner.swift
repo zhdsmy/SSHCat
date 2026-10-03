@@ -19,10 +19,12 @@ public enum RunState: Equatable, Sendable {
 
 public enum LaunchError: Error, Equatable, Sendable, LocalizedError {
     case binaryNotFound
+    case reverseSOCKSUnsupported
 
     public var errorDescription: String? {
         switch self {
         case .binaryNotFound: return L10n.core("runtime.binary_missing")
+        case .reverseSOCKSUnsupported: return L10n.core("runtime.reverse_socks_unsupported")
         }
     }
 }
@@ -44,14 +46,14 @@ public struct RunnerConfig: Sendable {
     /// A process still alive this long without printing `Authenticated to …` counts as running,
     /// for ssh builds that log differently. Longer than ConnectTimeout, so a dead host fails first.
     public var assumeRunningAfter: TimeInterval
-    public var launch: @Sendable (ForwardRule) throws -> LaunchSpec
+    public var launch: @Sendable (ForwardRule) async throws -> LaunchSpec
 
     public init(
         backoff: BackoffPolicy = BackoffPolicy(),
         terminateGrace: TimeInterval = 3,
         logCapacity: Int = 200,
         assumeRunningAfter: TimeInterval = 20,
-        launch: @escaping @Sendable (ForwardRule) throws -> LaunchSpec
+        launch: @escaping @Sendable (ForwardRule) async throws -> LaunchSpec
     ) {
         self.backoff = backoff
         self.terminateGrace = terminateGrace
@@ -60,10 +62,15 @@ public struct RunnerConfig: Sendable {
         self.launch = launch
     }
 
-    public static func live(locator: BinaryLocator) -> RunnerConfig {
+    public static func live(locator: BinaryLocator, identityAgent: @escaping @Sendable () -> String? = { AppSettings().identityAgent }) -> RunnerConfig {
         RunnerConfig(launch: { rule in
             guard let exe = locator.locate() else { throw LaunchError.binaryNotFound }
-            return LaunchSpec(executable: exe, arguments: try rule.arguments())
+            let arguments = try rule.arguments(identityAgent: identityAgent())
+            if rule.forwards.contains(where: { $0.kind == .remoteDynamic }) {
+                let version = try await SSHCommand.output(executable: exe, arguments: ["-V"], timeout: 2)
+                guard SSHCapabilities(version: version).supportsReverseSOCKS else { throw LaunchError.reverseSOCKSUnsupported }
+            }
+            return LaunchSpec(executable: exe, arguments: arguments)
         })
     }
 }
@@ -77,6 +84,11 @@ public final class ForwardRunner: ObservableObject, Identifiable {
 
     @Published public private(set) var state: RunState = .stopped
     @Published public private(set) var log: [String] = []
+    @Published public private(set) var failure: SSHFailure.Kind?
+    @Published public private(set) var offendingKnownHostsFile: String?
+    @Published public private(set) var hostKeyRemovalCommand: String?
+    @Published public private(set) var targetFailures: [UUID: SSHForwardFailure] = [:]
+    @Published public private(set) var unattributedTargetFailure: SSHForwardFailure?
 
     /// Called with the child pid when a process starts and with nil when it has exited.
     public var onPIDChange: ((UUID, Int32?) -> Void)?
@@ -100,6 +112,8 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         generation += 1
         let gen = generation
         let previous = task
+        failure = nil
+        clearTargetFailures()
         state = .starting
         task = Task { [weak self] in
             // A previous run may still be shutting down; wait so its listen ports are free.
@@ -114,7 +128,13 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         // caller returns. Signal the child immediately so the listen port is released.
         currentBox?.terminate(grace: config.terminateGrace)
         task?.cancel()
+        clearTargetFailures()
         state = .stopped
+    }
+
+    public func clearTargetFailures() {
+        targetFailures = [:]
+        unattributedTargetFailure = nil
     }
 
     public func restart(reason: String) {
@@ -151,10 +171,11 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         var attempt = 0
         while isCurrent(gen) {
             let spec: LaunchSpec
-            do { spec = try config.launch(rule) } catch {
+            do { spec = try await config.launch(rule) } catch {
                 setState(gen, .failed(reason: error.localizedDescription))
                 return
             }
+            guard isCurrent(gen) else { return }
             setState(gen, .starting)
             let outcome = await runOnce(gen: gen, spec: spec)
             guard isCurrent(gen) else { return }
@@ -162,9 +183,9 @@ public final class ForwardRunner: ObservableObject, Identifiable {
             let reason = describe(outcome)
             appendLog(L10n.core("runtime.process_exited", reason))
 
-            if outcome.launchFailed || SSHFailure.isPermanent(outcome.tail) || !rule.autoRestart {
+            if outcome.launchFailed || failure?.isPermanent == true || SSHFailure.isPermanent(outcome.tail) || !rule.autoRestart {
                 setState(gen, .failed(reason: reason))
-                let hint = SSHFailure.hint(for: reason).map { "\n\($0)" } ?? ""
+                let hint = (failure?.hint).map { "\n\($0)" } ?? ""
                 onNotify?(rule.name, L10n.core("notification.failed", reason, hint))
                 return
             }
@@ -213,6 +234,10 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         }
         let box = ProcessBox(process)
         runTail = []
+        failure = nil
+        offendingKnownHostsFile = nil
+        hostKeyRemovalCommand = nil
+        clearTargetFailures()
         let started = Date()
 
         if Task.isCancelled {
@@ -263,8 +288,18 @@ public final class ForwardRunner: ObservableObject, Identifiable {
         guard isCurrent(gen) else { return }
         if SSHLog.isAuthenticated(line), state == .starting { state = .running }
         appendLog(line)
+        if let target = SSHForwardFailure.parse(line, forwards: rule.forwards) {
+            if let id = target.forwardID { targetFailures[id] = target }
+            else { unattributedTargetFailure = target }
+            return
+        }
+        if let path = SSHFailure.offendingKnownHostsFile(in: [line]) { offendingKnownHostsFile = path }
+        if let command = SSHFailure.hostKeyRemovalCommand(in: [line]) { hostKeyRemovalCommand = command }
         runTail.append(line)
         if runTail.count > 20 { runTail.removeFirst(runTail.count - 20) }
+        if failure != .hostKeyChanged && failure != .hostKeyUnknown {
+            failure = SSHFailure.classify(runTail) ?? failure
+        }
     }
 
     private func appendLog(_ line: String) {

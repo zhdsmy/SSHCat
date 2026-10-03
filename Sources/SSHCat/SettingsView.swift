@@ -14,6 +14,8 @@ struct SettingsView: View {
     private let snapshotMode: Bool
     @ViewState private var path: String = ""
     @ViewState private var pathError: String?
+    @ViewState private var agentPath = ""
+    @ViewState private var agentError: String?
     @ViewState private var notes = true
     @ViewState private var language: AppLanguage = .system
     @ViewState private var launchAtLogin = false
@@ -59,6 +61,19 @@ struct SettingsView: View {
                 Text(L10n.text("settings.path_hint"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack {
+                    TextField(L10n.text("settings.agent_path"), text: $agentPath,
+                              prompt: Text(L10n.text("settings.agent_default")))
+                        .font(.system(.body, design: .monospaced)).help(agentPath).onSubmit(applyAgent)
+                    Button(L10n.text("action.apply"), action: applyAgent)
+                        .disabled(agentPath == (settings.identityAgent ?? ""))
+                }
+                if let agentError { Text(agentError).font(.caption).foregroundStyle(.red) }
+                if !snapshotMode, let agent = settings.identityAgent, !FileManager.default.fileExists(atPath: agent) {
+                    Text(L10n.text("settings.agent_missing")).font(.caption).foregroundStyle(.orange)
+                }
+                Text(L10n.text("settings.agent_hint")).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Section(L10n.text("settings.general")) {
                 Picker(L10n.text("language.label"), selection: $language) {
@@ -146,6 +161,8 @@ struct SettingsView: View {
     private func load() {
         path = settings.customBinaryPath ?? ""
         pathError = nil
+        agentPath = settings.identityAgent ?? ""
+        agentError = nil
         notes = settings.notificationsEnabled
         language = settings.language
         refreshPermissions()
@@ -215,5 +232,17 @@ struct SettingsView: View {
         pathError = nil
         settings.customBinaryPath = value
         if !snapshotMode { manager.refreshBinary() }
+    }
+
+    private func applyAgent() {
+        do {
+            let value = try AppSettings.validatedIdentityAgent(agentPath)
+            settings.identityAgent = value
+            agentPath = value ?? ""
+            agentError = nil
+            if !snapshotMode { manager.objectWillChange.send() }
+        } catch {
+            agentError = error.localizedDescription
+        }
     }
 }

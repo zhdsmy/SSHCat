@@ -104,7 +104,7 @@ public final class ForwardManager: ObservableObject {
         sshVersion = nil
         guard let path else { return }
         Task { [weak self] in
-            let version = await Task.detached { Self.probeVersion(path) }.value
+            let version = await Self.probeVersion(path)
             guard let self, self.binaryPath == path else { return }
             self.sshVersion = version
         }
@@ -134,18 +134,9 @@ public final class ForwardManager: ObservableObject {
     }
 
     /// `ssh -V` prints to stderr, e.g. `OpenSSH_10.3p1, LibreSSL 3.3.6`.
-    private nonisolated static func probeVersion(_ path: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["-V"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let line = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).first
+    private nonisolated static func probeVersion(_ path: String) async -> String? {
+        let output = try? await SSHCommand.output(executable: URL(fileURLWithPath: path), arguments: ["-V"], timeout: 2)
+        let line = output?.split(whereSeparator: \.isNewline).first
         return line.map(String.init)
     }
 
