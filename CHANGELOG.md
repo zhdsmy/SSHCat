@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 修复
+
+- 导入预览与本次选择的文件数据绑定，修复首次导入为空及再次导入可能显示旧数据的问题。
+- 导出遵守与导入相同的 1000 条 / 8 MiB 限制，超限时在写入前报错，保留已有备份。
+- `localhost` 监听冲突仅匹配 `127.0.0.1` 和 `::1`，不再误报独立回环地址（如 `127.0.0.2`），保留通配地址检查。
+
+### English
+
+- Bind each import preview to the selected archive, including the first import and reopening after cancellation.
+- Enforce the importer's 1,000-rule / 8 MiB limits on export before writing or replacing a backup.
+- Avoid false localhost conflicts with independent loopback addresses while preserving wildcard detection.
+
 ## [0.3.0] - 2026-10-03
 
 ### 新增

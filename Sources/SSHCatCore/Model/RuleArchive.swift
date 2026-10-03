@@ -1,6 +1,9 @@
 import Foundation
 
 public enum RuleArchive {
+    private static let maximumBytes = 8 * 1024 * 1024
+    private static let maximumRules = 1000
+
     public enum Duplicates: CaseIterable, Hashable { case skip, copy }
 
     public enum ImportError: Error, LocalizedError {
@@ -16,13 +19,13 @@ public enum RuleArchive {
     public static func read(_ url: URL) throws -> [ForwardRule] {
         let info = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
         guard info.isRegularFile == true else { throw CocoaError(.fileReadUnknown) }
-        if let size = info.fileSize, size > 8 * 1024 * 1024 {
+        if let size = info.fileSize, size > maximumBytes {
             throw ImportError.tooLarge
         }
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard data.count <= 8 * 1024 * 1024 else { throw ImportError.tooLarge }
+        guard data.count <= maximumBytes else { throw ImportError.tooLarge }
         let rules = try ForwardStore.decode(data)
-        guard rules.count <= 1000 else { throw ImportError.tooLarge }
+        guard rules.count <= maximumRules else { throw ImportError.tooLarge }
         for rule in rules {
             do { try rule.validate() }
             catch { throw ImportError.invalidRule(rule.name, error.localizedDescription) }
@@ -66,11 +69,15 @@ public enum RuleArchive {
     }
 
     public static func export(_ rules: [ForwardRule], to url: URL) throws {
+        guard rules.count <= maximumRules else { throw ImportError.tooLarge }
         for rule in rules {
             do { try rule.validate() }
             catch { throw ImportError.invalidRule(rule.name, error.localizedDescription) }
         }
+        let data = try ForwardStore.encode(rules)
+        // Every exported archive must be readable by the importer. Reject before touching the destination.
+        guard data.count <= maximumBytes else { throw ImportError.tooLarge }
         // Export can target Downloads or a shared folder; don't chmod the user's parent directory.
-        try SecureFile.write(ForwardStore.encode(rules), to: url, secureDirectory: false)
+        try SecureFile.write(data, to: url, secureDirectory: false)
     }
 }

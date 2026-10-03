@@ -91,6 +91,19 @@ import Testing
         #expect(!remoteForward("::1").clashes(with: forward("::1")))
     }
 
+    @Test func localhostConflictsOnlyWithItsListenersAndWildcards() {
+        let localhost = forward("localhost")
+        for address in ["127.0.0.1", "::1", "[0:0:0:0:0:0:0:1]", "0.0.0.0", "::", "*", "localhost"] {
+            #expect(localhost.clashes(with: forward(address)))
+            #expect(forward(address).clashes(with: localhost))
+        }
+        for address in ["127.0.0.2", "127.23.4.5", "192.0.2.1", "2001:db8::1"] {
+            #expect(!localhost.clashes(with: forward(address)))
+            #expect(!forward(address).clashes(with: localhost))
+        }
+        #expect(!remoteForward("127.0.0.2").needsGatewayPorts)
+    }
+
     @Test func decodesLegacyForwardData() throws {
         let json = #"{"name":"legacy","host":"devbox","forwards":[{"kind":"local","bindAddress":"127.0.0.1","bindPort":8080,"targetHost":"127.0.0.1","targetPort":8080}]}"#
         let rule = try JSONDecoder().decode(ForwardRule.self, from: Data(json.utf8))

@@ -7,6 +7,8 @@ import SSHCatCore
 /// rendering does not read SSH config, ask for notification permission, or register login items.
 @MainActor
 enum Snapshot {
+    static let importPreviewRequested = Notification.Name("SSHCat.snapshot.importPreview")
+
     static func run(arguments: [String]) -> Never {
         guard let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count else {
             exit(64)
@@ -59,6 +61,7 @@ enum Snapshot {
         let renderer = SnapshotRenderer(output: output, manager: manager, navigation: navigation)
         manager.reloadRules()
         manager.refreshBinary()
+        try await renderer.checkImportPresentation(directory: directory)
         try await renderer.page("empty-menu", MenuContent())
         try await renderer.page("empty-manage", ManageView(snapshotMode: true), size: CGSize(width: 900, height: 640))
 
@@ -227,6 +230,47 @@ private final class SnapshotRenderer {
     }
 
     private enum SnapshotCheck: Error { case failed(String) }
+
+    func checkImportPresentation(directory: URL) async throws {
+        var received: [ForwardRule]?
+        let host = NSHostingView(rootView: RuleTransferMenu(snapshotMode: true, snapshotPreview: { received = $0 })
+            .environmentObject(manager).environmentObject(navigation).environment(\.locale, L10n.locale))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 640, height: 540),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        for index in 1...2 {
+            let rules = (0..<index).map { ForwardRule(name: "Import \(index)-\($0)", host: "devbox", forwards: [PortForward()]) }
+            let url = directory.appendingPathComponent("import-\(index).json")
+            try RuleArchive.export(rules, to: url)
+            received = nil
+            NotificationCenter.default.post(name: Snapshot.importPreviewRequested, object: url)
+            for _ in 0..<50 {
+                if received != nil { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            guard received == rules, let sheet = window.attachedSheet else {
+                throw SnapshotCheck.failed("Import \(index) did not present the selected archive")
+            }
+            // Exercise the actual preview's Cancel shortcut before opening a different file.
+            sheet.makeKey()
+            let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                          windowNumber: sheet.windowNumber, context: nil,
+                                          characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                          isARepeat: false, keyCode: 53)!
+            sheet.sendEvent(escape)
+            for _ in 0..<50 {
+                if window.attachedSheet == nil { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            guard window.attachedSheet == nil else { throw SnapshotCheck.failed("Import preview did not dismiss") }
+        }
+        guard manager.rules.isEmpty else { throw SnapshotCheck.failed("Cancelling import changed saved rules") }
+        print("Isolated first import, cancel, and subsequent import presentation passed")
+    }
 
     func checkQuitProtection(rule: ForwardRule) {
         let delegate = AppDelegate(manager: manager, navigation: navigation)
