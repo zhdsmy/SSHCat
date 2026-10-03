@@ -47,7 +47,17 @@ enum Snapshot {
             RunnerConfig(backoff: BackoffPolicy(base: 60, cap: 60), terminateGrace: 0.1, launch: { rule in
                 let script: String
                 if rule.host == "missing.example" {
-                    script = "echo 'Host key verification failed.' >&2; exit 255"
+                    script = "echo 'No ED25519 host key is known for devbox and you have requested strict checking.' >&2; echo 'Host key verification failed.' >&2; exit 255"
+                } else if rule.host == "changed.example" {
+                    script = """
+                    echo 'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!' >&2
+                    echo 'Offending ED25519 key in /Users/me/.ssh/known_hosts:4' >&2
+                    echo '  ssh-keygen -f "/Users/me/.ssh/known_hosts" -R "changed.example"' >&2
+                    echo 'Host key verification failed.' >&2
+                    exit 255
+                    """
+                } else if rule.host == "target-errors.example" {
+                    script = "echo 'Authenticated to devbox using publickey.' >&2; echo 'channel 2: open failed: connect failed: Connection refused' >&2; echo 'connect_to localhost port 3000: failed.' >&2; exec sleep 120"
                 } else if rule.host == "offline.example" {
                     script = "echo 'Connection refused' >&2; exit 255"
                 } else {
@@ -120,6 +130,7 @@ enum Snapshot {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
         settings.language = language
+        settings.identityAgent = "/Users/me/Agent Sockets/agent.sock"
         try await renderer.page("settings", SettingsView(settings: settings, snapshotMode: true),
                                 size: CGSize(width: 520, height: 680))
         try await renderer.page("update-available", SettingsView(settings: settings, snapshotMode: true, update: .available("v0.2.0")),
@@ -127,6 +138,47 @@ enum Snapshot {
         try await renderer.page("permissions", SettingsView(settings: settings, snapshotMode: true,
                                                            notificationStatus: .denied, loginStatus: .requiresApproval),
                                 size: CGSize(width: 520, height: 680))
+        let targetErrors = ForwardRule(name: "Target Errors", host: "target-errors.example", forwards: [PortForward(bindPort: 8180),
+            PortForward(kind: .remote, bindPort: 9100, targetHost: "localhost", targetPort: 3000)])
+        let changed = ForwardRule(name: "Changed Host Key", host: "changed.example", forwards: [PortForward(bindPort: 8181)])
+        let reverse = ForwardRule(name: "Remote SOCKS", host: "devbox", forwards: [PortForward(kind: .remoteDynamic, bindPort: 1080)])
+        for rule in [targetErrors, changed, reverse] { manager.add(rule) }
+        manager.setActive(true, id: targetErrors.id)
+        manager.setActive(true, id: changed.id)
+        for _ in 0..<100 {
+            if manager.runner(id: targetErrors.id)?.unattributedTargetFailure != nil,
+               manager.runner(id: targetErrors.id)?.targetFailures.count == 1,
+               manager.runner(id: changed.id)?.state == .failed(reason: "Host key verification failed.") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        assert(manager.runner(id: targetErrors.id)?.state == .running)
+        assert(manager.runner(id: targetErrors.id)?.targetFailures.count == 1)
+        assert(manager.runner(id: changed.id)?.failure == .hostKeyChanged)
+        navigation.show(targetErrors.id)
+        try await renderer.page("target-failures", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 700))
+        navigation.show(changed.id)
+        try await renderer.page("host-key-changed", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 700))
+        navigation.show(reverse.id)
+        try await renderer.page("remote-socks", ManageView(snapshotMode: true), size: CGSize(width: 760, height: 700))
+        let config = SSHConfiguration(output: """
+        user app
+        hostname devbox.example
+        port 2222
+        proxyjump gateway
+        identityfile /Users/me/My Keys/id_ed25519
+        identityfile ~/.ssh/id_ed25519
+        identityagent /Users/me/Agent Sockets/agent.sock
+        hostkeyalias trusted-devbox
+        userknownhostsfile /Users/me/.ssh/known_hosts
+        localforward 8181 127.0.0.1:8080
+        localforward 9090 127.0.0.1:9090
+        """)
+        let request = SSHConfigurationRequest(rule: changed, executable: binary, identityAgent: settings.identityAgent,
+                                               knownHostsFile: "/Users/me/.ssh/known_hosts",
+                                               hostKeyRemovalCommand: "ssh-keygen -f /Users/me/.ssh/known_hosts -R changed.example",
+                                               sshVersion: "OpenSSH_10.3p1")
+        try await renderer.page("ssh-configuration-ready", SSHConfigurationView(request: request, snapshotMode: true))
+        try await renderer.page("ssh-configuration", SSHConfigurationView(request: request, snapshotMode: true, configuration: config))
         var long = rules[2]
         long.name = "Demo Environment · " + String(repeating: "Long-running Port Forward ", count: 8)
         manager.update(long)

@@ -59,7 +59,7 @@ swift scripts/make-icon.swift   # Resources/AppIcon.icns（菜单栏图标在 So
 ./scripts/snapshot.sh --language=zh-Hant --dark # build/snapshots-zh-Hant-dark/
 ```
 
-快照入口仅在 debug 构建中可用，使用临时数据、隔离偏好和 `/bin/sh` 假 ssh；不读取真实规则或 `~/.ssh/config`，不触碰登录项，也不建立真实 SSH 连接。覆盖正常、空白、失败、重连、草稿、搜索、长名称、多规则、更新提示、配置错误，以及字段校验、状态筛选、主机选择、导入预览、退出确认和系统权限。隔离测试还实际驱动端口文本编辑、切换规则后的草稿恢复、退出确认的两种选择，以及首次导入和取消后再次导入的弹窗数据。滚动页面会追加 `-scroll-N` 图片；图片不含标题栏和工具栏，未聚焦窗口的开关可能显示灰色。这些检查不代替原生文件窗口和系统设置的完整交互测试。
+快照入口仅在 debug 构建中可用，使用临时数据、隔离偏好和 `/bin/sh` 假 ssh；不读取真实规则或 `~/.ssh/config`，不触碰登录项，也不建立真实 SSH 连接。覆盖正常、空白、失败、重连、草稿、搜索、长名称、多规则、更新提示、配置错误，以及字段校验、状态筛选、主机选择、导入预览、退出确认和系统权限；新增目标失败、主机密钥变更、反向 SOCKS 和实际配置预览。设置 `SSH_CAT_SCRATCH_PATH`、`SSH_CAT_SNAPSHOT_ROOT` 可将构建和图片放入临时目录。隔离测试还实际驱动端口文本编辑、切换规则后的草稿恢复、退出确认的两种选择，以及首次导入和取消后再次导入的弹窗数据。滚动页面会追加 `-scroll-N` 图片；图片不含标题栏和工具栏，未聚焦窗口的开关可能显示灰色。这些检查不代替原生文件窗口和系统设置的完整交互测试。
 
 `swift build` 出来的二进制没有打成 App，会带 Dock 图标。菜单栏形态以 `build/SSHCat.app` 为准。App 只做了 ad-hoc 签名。
 
@@ -71,13 +71,14 @@ swift run SSHCat
 
 ## 新建一条转发
 
-1. 点菜单栏“新建转发”，选择本地、远程转发或 SOCKS 代理；也可在管理窗口的新增菜单或“使用说明”中创建。
+1. 点菜单栏“新建转发”，选择本地、远程转发、本地 SOCKS 或反向 SOCKS 代理；也可在管理窗口的新增菜单或“使用说明”中创建。
 2. 主机填 `~/.ssh/config` 里的 Host 名、主机名或 IP 地址。主机选择器支持搜索、刷新和 `Include` 文件中的别名。用户、端口、密钥留空时沿用该 Host 的配置，包括 `ProxyJump`。
 3. 需要覆盖时再填端口（传给 `-p`）或密钥路径（传给 `-i`，并加上 `IdentitiesOnly=yes`）。
 4. 添加转发：
    - 本地：本机 `绑定地址:端口` 转到 SSH 服务器能访问的 `目标主机:端口`
    - 远程：SSH 服务器上的 `绑定地址:端口` 转到本机的 `目标主机:端口`。绑定地址不是回环时，服务器要开 `GatewayPorts`
    - 动态：本机 SOCKS 代理
+   - 反向 SOCKS：在 SSH 服务器监听 SOCKS 端口，通过这台 Mac 访问请求的目标（`-R 地址:端口`，没有固定目标）。需要 OpenSSH 7.6+ 客户端，连接前会检查所选程序的版本。
 5. 点“保存并连接”，或保存后打开规则。关闭规则后释放监听端口；关闭管理窗口会继续转发，退出 SSHCat 才会停止它启动的进程。
 
 管理窗口支持按名称、主机或端口搜索，菜单与侧栏均可筛选运行中或失败的规则。菜单显示转发端点，端口冲突提示会列出相关规则名称。“…”中的“创建副本”保留已保存配置并关闭副本的自动启动；修改监听端口可避免与原规则冲突。
@@ -102,9 +103,29 @@ ssh -N -o ExitOnForwardFailure=yes -o BatchMode=yes \
   -L 127.0.0.1:8080:127.0.0.1:8080 app@devbox
 ```
 
-`ControlMaster=no` 让这条连接的生命周期归 App：关掉规则就会停掉转发，而不会挂在用户自己的 ControlMaster 上。`ServerAlive*` 让断掉的会话自己退出，再按指数退避重连。`ExitOnForwardFailure=yes` 让监听端口失败时 ssh 立刻退出，而不是假装还在转发。`ConnectTimeout=10` 让连不上的主机 10 秒内失败。`LogLevel=VERBOSE` 让 ssh 在认证成功后打印 `Authenticated to …`，App 以此判定“运行中”，而不是进程一启动就算成功。
+`ControlMaster=no` 让这条连接的生命周期归 App：关掉规则就会停掉转发，而不会挂在用户自己的 ControlMaster 上。`ServerAlive*` 让断掉的会话自己退出，再按指数退避重连。`ExitOnForwardFailure=yes` 让监听端口失败时 ssh 立刻退出，而不是假装还在转发。`ConnectTimeout=10` 让连不上的主机 10 秒内失败。`LogLevel=VERBOSE` 让 ssh 在认证成功后打印 `Authenticated to …`，App 以此判定“运行中”；针对日志不同的 SSH 程序，还保留延迟兜底，而不是进程一启动就算成功。
 
 界面可以复制这条等价命令。实际启动一律以 argv 执行，不经 shell。
+
+## SSH 排障
+
+SSHCat 从已有 SSH 日志记录转发失败，不额外建立探测连接。远程 `connect_to` 错误仅在目标唯一匹配一条已保存的远程转发时标在对应行旁；缺少端点的 channel 错误显示在规则级，包括本地和 SOCKS 转发错误。这些告警表示过去某次尝试失败，不是持续健康检查：没有告警不代表目标可达，后续成功也可能没有日志。可手动清除，重连时也会清空；目标错误不会重启 SSH 会话。
+
+失败提示区分未知及变更的主机密钥、agent 密钥过多、拒绝连接、超时与远程监听失败。远程端口可能被旧 sshd 会话占用，也可能被服务端转发策略禁止，仍保留退避重试。主机密钥改变会醒目告警，删除可信记录前必须向服务器管理员核实新指纹。
+
+点击“实际生效的 SSH 配置”，再点“读取配置”，用所选 SSH 程序、当前编辑值和连接时相同的命令行覆盖项执行 `ssh -G`。预览显示 User、HostName、Port、ProxyJump、IdentityFile、IdentityAgent 以及所有实际转发；来自 SSH 配置的额外转发会告警，因为它们的监听冲突也可能使整条规则失败。读取不会建立 SSH 会话，但 **SSH 配置中的 `Match exec` 命令可能被执行**。读取限制为 5 秒和 256 KiB，关闭预览会取消预览的 SSH 进程。对于密钥变更，优先从 SSH 自己的清理建议提取参数并重新构造带正确引号的 `ssh-keygen -f ... -R ...` 命令，以保留实际发生错误的跳板机目标。若日志没有建议命令，直连时可在预览中按冲突文件、实际 HostName/HostKeyAlias 和端口生成；代理连接无法确认是哪台主机失败时不猜测。SSHCat 不执行这条命令，也不修改可信密钥文件。
+
+GUI App 不会继承 `.zshrc` 中导出的环境变量。使用 1Password、Secretive 等 agent 时，可在设置填写绝对“Agent socket 路径”，或在 `~/.ssh/config` 对应 Host 下设置 `IdentityAgent`。全局设置会覆盖所有 Host 的 IdentityAgent，留空则沿用 SSH 配置和 `SSH_AUTH_SOCK`。修改在下次连接生效，不中断现有会话；等价命令和首次连接命令也包含该覆盖项。复制诊断会显示覆盖值、`SSH_AUTH_SOCK` 是否已设置及其路径是否存在，路径存在不代表 agent 一定响应。
+
+反向 SOCKS 允许服务器通过 Mac 所在网络访问目标。建议只监听服务端回环，并通过客户端 `PermitRemoteOpen` 限制目标；此选项需要 OpenSSH 8.5+，例如：
+
+```sshconfig
+Host devbox
+    IdentityAgent "/Users/me/Agent Sockets/agent.sock"
+    PermitRemoteOpen service.internal:443 192.168.1.10:5432
+```
+
+现有 v1 规则仍可原样读取；包含反向 SOCKS 新类型的归档需要支持此类型的 SSHCat 版本。
 
 ## 导入导出与系统权限
 

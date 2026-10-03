@@ -36,6 +36,45 @@ private func isFailed(_ state: RunState) -> Bool {
 /// Drives ForwardRunner with /bin/sh scripts standing in for ssh.
 @MainActor
 @Suite struct RunnerTests {
+    @Test func targetFailuresDoNotRestartTheSSHSession() async throws {
+        var saved = rule()
+        let remote = PortForward(kind: .remote, targetHost: "localhost", targetPort: 3000)
+        saved.forwards.append(remote)
+        let script = """
+        echo 'Authenticated to devbox using publickey.' >&2
+        echo 'channel 2: open failed: connect failed: Connection refused' >&2
+        echo 'connect_to localhost port 3000: failed.' >&2
+        exec sleep 30
+        """
+        let runner = ForwardRunner(rule: saved, config: shConfig(script))
+        defer { runner.stop() }
+        runner.start()
+        #expect(await waitUntil { runner.targetFailures[remote.id] != nil && runner.unattributedTargetFailure != nil })
+        #expect(runner.state == .running)
+        #expect(runner.failure == nil)
+        runner.clearTargetFailures()
+        #expect(runner.targetFailures.isEmpty && runner.unattributedTargetFailure == nil)
+    }
+
+    @Test func hostKeyChangedContextSurvivesGenericFinalError() async {
+        let script = """
+        echo 'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!' >&2
+        echo 'Offending ED25519 key in /Users/me/.ssh/known_hosts:4' >&2
+        echo '  ssh-keygen -f "/Users/me/.ssh/known_hosts" -R "gateway.example"' >&2
+        echo 'Host key verification failed.' >&2
+        exit 255
+        """
+        let runner = ForwardRunner(rule: rule(), config: shConfig(script))
+        var notes: [String] = []
+        runner.onNotify = { _, body in notes.append(body) }
+        runner.start()
+        #expect(await waitUntil { isFailed(runner.state) })
+        #expect(runner.failure == .hostKeyChanged)
+        #expect(runner.offendingKnownHostsFile == "/Users/me/.ssh/known_hosts")
+        #expect(runner.hostKeyRemovalCommand == "ssh-keygen -f /Users/me/.ssh/known_hosts -R gateway.example")
+        #expect(notes.first?.contains(L10n.core("failure.host_key_changed_hint")) == true)
+    }
+
     @Test func becomesRunningWhileProcessLives() async {
         let runner = ForwardRunner(rule: rule(), config: shConfig(upScript))
         runner.start()

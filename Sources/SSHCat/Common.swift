@@ -100,6 +100,7 @@ struct NewRuleMenu: View {
             Button(L10n.text("action.new_local")) { action(.local) }
             Button(L10n.text("action.new_remote")) { action(.remote) }
             Button(L10n.text("action.new_dynamic")) { action(.dynamic) }
+            Button(L10n.text("action.new_remote_dynamic")) { action(.remoteDynamic) }
         } label: {
             Label(L10n.text("action.new_forward"), systemImage: "plus")
         }
@@ -177,9 +178,14 @@ struct CopyButton: View {
 /// State with a live retry countdown, plus the reason ssh gave and what to do about it.
 struct StateDetail: View {
     let state: RunState
+    var failure: SSHFailure.Kind? = nil
+    var hostKeyRemovalCommand: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if failure == .hostKeyChanged {
+                Label(L10n.text("failure.key_changed"), systemImage: "exclamationmark.shield").foregroundStyle(.red)
+            }
             switch state {
             case .reconnecting(let attempt, let retryAt, _):
                 // Keep the entire sentence localizable while refreshing the countdown.
@@ -197,13 +203,26 @@ struct StateDetail: View {
                 Text(reason)
                     .font(.system(.callout, design: .monospaced))
                     .textSelection(.enabled)
-                if let hint = SSHFailure.hint(for: reason) {
-                    Text(hint).foregroundStyle(.secondary)
+                if let hint = failure?.hint ?? SSHFailure.hint(for: reason) {
+                    Text(hint).foregroundStyle(failure == .hostKeyChanged ? Color.red : Color.secondary)
                 }
+            }
+            if failure == .hostKeyChanged, let command = hostKeyRemovalCommand {
+                Text(command).font(.caption.monospaced()).textSelection(.enabled)
+                CopyButton(text: command, label: L10n.text("configuration.copy_key_removal"))
             }
         }
         .font(.callout)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct TargetFailureNotice: View {
+    let failure: SSHForwardFailure
+    var body: some View {
+        Label(failure.message, systemImage: "exclamationmark.triangle")
+            .font(.caption).foregroundStyle(.orange).help(failure.line)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

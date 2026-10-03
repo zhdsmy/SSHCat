@@ -5,12 +5,14 @@ public enum ForwardKind: String, Codable, Sendable, CaseIterable, Equatable {
     case local
     case remote
     case dynamic
+    case remoteDynamic
 
     public var label: String {
         switch self {
         case .local: return L10n.core("forward.kind.local")
         case .remote: return L10n.core("forward.kind.remote")
         case .dynamic: return L10n.core("forward.kind.dynamic")
+        case .remoteDynamic: return L10n.core("forward.kind.remote_dynamic")
         }
     }
 
@@ -19,17 +21,22 @@ public enum ForwardKind: String, Codable, Sendable, CaseIterable, Equatable {
         case .local: return L10n.core("forward.default.local")
         case .remote: return L10n.core("forward.default.remote")
         case .dynamic: return L10n.core("forward.default.dynamic")
+        case .remoteDynamic: return L10n.core("forward.default.remote_dynamic")
         }
     }
 
-    /// ssh flag for this forward. Dynamic forwards have no remote target.
+    /// SOCKS forwards choose their destination per connection and have no fixed target.
     public var flag: String {
         switch self {
         case .local: return "-L"
-        case .remote: return "-R"
+        case .remote, .remoteDynamic: return "-R"
         case .dynamic: return "-D"
         }
     }
+
+    public var hasTarget: Bool { self == .local || self == .remote }
+    public var isRemote: Bool { self == .remote || self == .remoteDynamic }
+    public var defaultPort: Int { hasTarget ? 8080 : 1080 }
 }
 
 public enum ForwardIssue: Error, Equatable, Sendable, LocalizedError {
@@ -38,6 +45,7 @@ public enum ForwardIssue: Error, Equatable, Sendable, LocalizedError {
     case invalidUser
     case invalidPort
     case invalidIdentity
+    case invalidAgent
     case noForwards
     case invalidBind(String)
     case invalidTarget(String)
@@ -50,6 +58,7 @@ public enum ForwardIssue: Error, Equatable, Sendable, LocalizedError {
         case .invalidUser: return L10n.core("validation.user_invalid")
         case .invalidPort: return L10n.core("validation.port_invalid")
         case .invalidIdentity: return L10n.core("validation.identity_invalid")
+        case .invalidAgent: return L10n.core("validation.agent_invalid")
         case .noForwards: return L10n.core("validation.forwards_empty")
         case .invalidBind(let s): return L10n.core("validation.bind_invalid", s)
         case .invalidTarget(let s): return L10n.core("validation.target_invalid", s)
@@ -64,7 +73,7 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
     /// Address ssh binds. For remote forwards this address is on the server.
     public var bindAddress: String
     public var bindPort: Int
-    /// Ignored for dynamic forwards.
+    /// Ignored for local and remote SOCKS forwards.
     public var targetHost: String
     public var targetPort: Int
 
@@ -98,7 +107,7 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
     public var localEndpoint: String? {
         switch kind {
         case .local, .dynamic: return "\(SSHToken.forwardAddress(bindAddress)):\(bindPort)"
-        case .remote: return nil
+        case .remote, .remoteDynamic: return nil
         }
     }
 
@@ -110,18 +119,20 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
             return L10n.core("forward.remote_summary", SSHToken.forwardAddress(bindAddress), bindPort,
                              SSHToken.forwardAddress(targetHost), targetPort)
         case .dynamic: return "SOCKS \(SSHToken.forwardAddress(bindAddress)):\(bindPort)"
+        case .remoteDynamic:
+            return L10n.core("forward.remote_dynamic_summary", SSHToken.forwardAddress(bindAddress), bindPort)
         }
     }
 
     /// Remote bind outside loopback only works when sshd has GatewayPorts enabled.
     public var needsGatewayPorts: Bool {
-        kind == .remote && !SSHToken.isLoopback(bindAddress)
+        kind.isRemote && !SSHToken.isLoopback(bindAddress)
     }
 
     public func validate() throws {
         if !SSHToken.isAddress(bindAddress) { throw ForwardIssue.invalidBind(bindAddress) }
         if !SSHToken.isPort(bindPort) { throw ForwardIssue.invalidForwardPort(String(bindPort)) }
-        if kind != .dynamic {
+        if kind.hasTarget {
             if !SSHToken.isAddress(targetHost) { throw ForwardIssue.invalidTarget(targetHost) }
             if !SSHToken.isPort(targetPort) { throw ForwardIssue.invalidForwardPort(String(targetPort)) }
         }
@@ -133,7 +144,7 @@ public struct PortForward: Codable, Identifiable, Equatable, Sendable {
         switch kind {
         case .local, .remote:
             return [kind.flag, "\(SSHToken.forwardAddress(bindAddress)):\(bindPort):\(SSHToken.forwardAddress(targetHost)):\(targetPort)"]
-        case .dynamic:
+        case .dynamic, .remoteDynamic:
             return [kind.flag, "\(SSHToken.forwardAddress(bindAddress)):\(bindPort)"]
         }
     }
@@ -240,7 +251,7 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
     /// ExitOnForwardFailure so a bind error is not silent, ConnectTimeout so an unreachable host
     /// fails in seconds rather than the TCP timeout. VERBOSE makes ssh print `Authenticated to …`,
     /// the runner's signal that the session is actually up (see `SSHLog`).
-    public func arguments() throws -> [String] {
+    public func arguments(identityAgent: String? = nil) throws -> [String] {
         try validate()
         var args = [
             "-N",
@@ -253,6 +264,9 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
             "-o", "ConnectTimeout=10",
             "-o", "LogLevel=VERBOSE",
         ]
+        if let agent = try AppSettings.validatedIdentityAgent(identityAgent) {
+            args += ["-o", "IdentityAgent=\(SSHToken.quotedOptionValue(agent))"]
+        }
         if let port {
             args.append(contentsOf: ["-p", String(port)])
         }
@@ -268,13 +282,16 @@ public struct ForwardRule: Codable, Identifiable, Equatable, Sendable {
         return args
     }
 
-    public func commandLine(executable: String) -> String {
-        guard let args = try? arguments() else { return L10n.core("rule.command_unavailable") }
+    public func commandLine(executable: String, identityAgent: String? = nil) -> String {
+        guard let args = try? arguments(identityAgent: identityAgent) else { return L10n.core("rule.command_unavailable") }
         return ShellQuote.join([executable] + args)
     }
 }
 
 enum SSHToken {
+    static func quotedOptionValue(_ value: String) -> String {
+        "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
     /// Host aliases cannot contain a port separator. Colons are accepted only in valid IPv6 literals.
     static func isHost(_ raw: String) -> Bool {
         guard !containsControl(raw) else { return false }
@@ -435,7 +452,7 @@ enum SSHToken {
         !s.hasPrefix("-") && !s.contains(where: { $0.isWhitespace }) && !containsControl(s)
     }
 
-    private static func containsControl(_ value: String) -> Bool {
+    static func containsControl(_ value: String) -> Bool {
         let controls = CharacterSet.controlCharacters
         return value.unicodeScalars.contains { controls.contains($0) }
     }
@@ -465,25 +482,87 @@ public enum SSHLog {
 
 /// stderr lines that will not start working just by launching ssh again.
 public enum SSHFailure {
-    /// What the user can do about a failure ssh reports tersely.
-    public static func hint(for reason: String) -> String? {
-        let text = reason.lowercased()
-        if text.contains("host key verification failed") {
-            return L10n.core("failure.host_key_hint")
+    public enum Kind: Equatable, Sendable {
+        case hostKeyChanged, hostKeyUnknown, hostKeyVerification, authentication, tooManyKeys
+        case localPort, remotePort, unresolvedHost, refused, timedOut
+
+        public var isPermanent: Bool {
+            switch self {
+            case .hostKeyChanged, .hostKeyUnknown, .hostKeyVerification, .authentication, .tooManyKeys, .localPort: return true
+            case .remotePort, .unresolvedHost, .refused, .timedOut: return false
+            }
         }
-        if text.contains("permission denied") {
-            return L10n.core("failure.authentication_hint")
+
+        public var hint: String {
+            switch self {
+            case .hostKeyChanged: return L10n.core("failure.host_key_changed_hint")
+            case .hostKeyUnknown: return L10n.core("failure.host_key_unknown_hint")
+            case .hostKeyVerification: return L10n.core("failure.host_key_hint")
+            case .authentication: return L10n.core("failure.authentication_hint")
+            case .tooManyKeys: return L10n.core("failure.too_many_keys_hint")
+            case .localPort: return L10n.core("failure.port_hint")
+            case .remotePort: return L10n.core("failure.remote_port_hint")
+            case .unresolvedHost: return L10n.core("failure.host_hint")
+            case .refused: return L10n.core("failure.refused_hint")
+            case .timedOut: return L10n.core("failure.timeout_hint")
+            }
         }
-        if text.contains("address already in use") {
-            return L10n.core("failure.port_hint")
-        }
-        if text.contains("could not resolve hostname") {
-            return L10n.core("failure.host_hint")
+    }
+
+    public static func classify(_ lines: [String]) -> Kind? {
+        let text = lines.joined(separator: "\n").lowercased()
+        if text.contains("remote host identification has changed") { return .hostKeyChanged }
+        if text.contains("no ") && text.contains("host key is known") { return .hostKeyUnknown }
+        if text.contains("host key verification failed") { return .hostKeyVerification }
+        if text.contains("too many authentication failures") { return .tooManyKeys }
+        if text.contains("permission denied") { return .authentication }
+        if text.contains("remote port forwarding failed") { return .remotePort }
+        if text.contains("address already in use") || text.contains("cannot listen to port") { return .localPort }
+        if text.contains("could not resolve hostname") { return .unresolvedHost }
+        if text.contains("connection refused") { return .refused }
+        if text.contains("timed out") || text.contains("timeout,") { return .timedOut }
+        return nil
+    }
+
+    public static func offendingKnownHostsFile(in lines: [String]) -> String? {
+        let regex = try! NSRegularExpression(pattern: #"^Offending .+ key in (/.+):\d+$"#)
+        for line in lines {
+            let ns = line as NSString
+            if let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+                return ns.substring(with: match.range(at: 1))
+            }
         }
         return nil
     }
 
+    /// Reconstruct only the two arguments suggested by SSH; never copy executable shell syntax.
+    public static func hostKeyRemovalCommand(in lines: [String]) -> String? {
+        let regex = try! NSRegularExpression(pattern: #"^\s*ssh-keygen -f (?:"([^"]+)"|'([^']+)'|(\S+)) -R (?:"([^"]+)"|'([^']+)'|(\S+))\s*$"#)
+        for line in lines {
+            let ns = line as NSString
+            guard let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) else { continue }
+            let file = (1...3).compactMap { index -> String? in
+                let range = match.range(at: index)
+                return range.location == NSNotFound ? nil : ns.substring(with: range)
+            }.first
+            let host = (4...6).compactMap { index -> String? in
+                let range = match.range(at: index)
+                return range.location == NSNotFound ? nil : ns.substring(with: range)
+            }.first
+            guard let file, let host, file.hasPrefix("/"), !host.hasPrefix("-"),
+                  !SSHToken.containsControl(file), !SSHToken.containsControl(host) else { continue }
+            return ShellQuote.join(["ssh-keygen", "-f", file, "-R", host])
+        }
+        return nil
+    }
+
+    /// What the user can do about a failure ssh reports tersely.
+    public static func hint(for reason: String) -> String? {
+        classify([reason])?.hint
+    }
+
     public static func isPermanent(_ lines: [String]) -> Bool {
+        if classify(lines) == .remotePort { return false }
         let blob = lines.joined(separator: "\n").lowercased()
         let needles = [
             "address already in use",
@@ -494,6 +573,9 @@ public enum SSHFailure {
             "bad dynamic forwarding specification",
             "no such file or directory",
             "host key verification failed",
+            "remote host identification has changed",
+            "host key is known",
+            "too many authentication failures",
         ]
         return needles.contains { blob.contains($0) }
     }

@@ -16,7 +16,9 @@ case "$SNAPSHOT_LANGUAGE" in
   en|zh-Hans|zh-Hant) ;;
   *) echo "unsupported snapshot language: $SNAPSHOT_LANGUAGE" >&2; exit 64 ;;
 esac
-OUT="build/snapshots-$SNAPSHOT_LANGUAGE$THEME_SUFFIX"
-swift build
+OUT="${SSH_CAT_SNAPSHOT_ROOT:-build}/snapshots-$SNAPSHOT_LANGUAGE$THEME_SUFFIX"
+BUILD_PATH="${SSH_CAT_SCRATCH_PATH:-.build}"
+swift build --scratch-path "$BUILD_PATH"
+BIN_DIR="$(swift build --scratch-path "$BUILD_PATH" --show-bin-path)"
 rm -rf "$OUT"
-.build/debug/SSHCat --snapshot "$OUT" "$@"
+"$BIN_DIR/SSHCat" --snapshot "$OUT" "$@"

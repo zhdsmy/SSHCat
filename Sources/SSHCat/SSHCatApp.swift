@@ -79,7 +79,7 @@ final class Navigation: ObservableObject {
 
     func add(_ kind: ForwardKind, using manager: ForwardManager) {
         let rule = ForwardRule(name: kind.defaultName,
-                               forwards: [PortForward(kind: kind, bindPort: kind == .dynamic ? 1080 : 8080)])
+                               forwards: [PortForward(kind: kind, bindPort: kind.defaultPort)])
         guard manager.add(rule) else { return }
         show(rule.id)
     }
