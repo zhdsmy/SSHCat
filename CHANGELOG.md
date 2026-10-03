@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-03
+
 ### 新增
 
 - 从 SSH 日志记录近期目标转发失败，能唯一定位的远程目标显示在对应行旁，其余显示规则级提示，不额外探测或重启会话。
@@ -111,7 +113,8 @@
 - 数据文件 0600、目录 0700、原子写入；不保存密码或私钥内容。
 - 以 universal（Apple 芯片 + Intel）DMG 发布，ad-hoc 签名，未经 Apple 公证。
 
-[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/zhdsmy/SSHCat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/zhdsmy/SSHCat/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/zhdsmy/SSHCat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/zhdsmy/SSHCat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zhdsmy/SSHCat/compare/v0.1.1...v0.2.0
