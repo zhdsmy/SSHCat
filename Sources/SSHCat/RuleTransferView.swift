@@ -7,9 +7,15 @@ struct RuleTransferMenu: View {
     @EnvironmentObject var manager: ForwardManager
     @EnvironmentObject var navigation: Navigation
     var snapshotMode = false
-    @ViewState private var incoming: [ForwardRule] = []
-    @ViewState private var showingPreview = false
+    private struct PendingImport: Identifiable {
+        let id = UUID()
+        let rules: [ForwardRule]
+    }
+    @ViewState private var incoming: PendingImport?
     @ViewState private var error: String?
+    #if DEBUG
+    var snapshotPreview: (([ForwardRule]) -> Void)?
+    #endif
 
     var body: some View {
         Menu {
@@ -21,7 +27,18 @@ struct RuleTransferMenu: View {
                 .disabled(manager.rules.isEmpty)
         } label: { Label(L10n.text("transfer.title"), systemImage: "square.and.arrow.up") }
         .disabled(snapshotMode)
-        .sheet(isPresented: $showingPreview) { ImportPreview(rules: incoming) }
+        .sheet(item: $incoming) { item in
+            #if DEBUG
+            ImportPreview(rules: item.rules, snapshotPresented: snapshotMode ? snapshotPreview : nil)
+            #else
+            ImportPreview(rules: item.rules)
+            #endif
+        }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: Snapshot.importPreviewRequested)) { notification in
+            if snapshotMode, let url = notification.object as? URL { loadPreview(from: url) }
+        }
+        #endif
         .alert(L10n.text("transfer.error"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button(L10n.text("action.close")) { error = nil }
         } message: { Text(error ?? "") }
@@ -34,7 +51,11 @@ struct RuleTransferMenu: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { incoming = try RuleArchive.read(url); showingPreview = true }
+        loadPreview(from: url)
+    }
+
+    private func loadPreview(from url: URL) {
+        do { incoming = PendingImport(rules: try RuleArchive.read(url)) }
         catch { self.error = error.localizedDescription }
     }
 
@@ -54,6 +75,9 @@ struct ImportPreview: View {
     @Environment(\.dismiss) private var dismiss
     let rules: [ForwardRule]
     @ViewState private var duplicates: RuleArchive.Duplicates = .skip
+    #if DEBUG
+    var snapshotPresented: (([ForwardRule]) -> Void)?
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -94,5 +118,8 @@ struct ImportPreview: View {
                 }.disabled(count == 0 || !manager.canEditRules).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 560, height: 460)
+        #if DEBUG
+        .onAppear { snapshotPresented?(rules) }
+        #endif
     }
 }

@@ -45,5 +45,5 @@
 "validation.target_invalid" = "目標位址無效：%@";
 "validation.user_invalid" = "使用者名稱不能含空白或 @，也不能以 - 開頭";
 "runtime.manual_retry" = "手動重試";
-"import.too_large" = "匯入檔案上限為 8 MB、1000 條規則。";
+"import.too_large" = "規則檔案上限為 8 MiB、1000 條規則。請減少每次匯出的規則數量。";
 "import.invalid_rule" = "規則「%@」無效：%@";

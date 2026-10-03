@@ -90,6 +90,33 @@ private func exampleRule() -> ForwardRule {
         #expect(copies.allSatisfy { !$0.autoStart && $0.name != rule.name })
     }
 
+    @Test func exportLimitsAllowRoundTripsAndPreserveExistingFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("rules.json")
+        let rules = (0..<1000).map { ForwardRule(name: "Rule \($0)", host: "devbox", forwards: [PortForward()]) }
+        try RuleArchive.export(rules, to: url)
+        #expect(try RuleArchive.read(url) == rules)
+        let original = try Data(contentsOf: url)
+        #expect(throws: RuleArchive.ImportError.self) { try RuleArchive.export(rules + [exampleRule()], to: url) }
+        #expect(try Data(contentsOf: url) == original)
+
+        var large = exampleRule()
+        large.name = "猫"
+        let padding = 8 * 1024 * 1024 - (try ForwardStore.encode([large])).count
+        large.name += String(repeating: "a", count: padding)
+        try RuleArchive.export([large], to: url)
+        #expect(try Data(contentsOf: url).count == 8 * 1024 * 1024)
+        #expect(try RuleArchive.read(url) == [large])
+        let atLimit = try Data(contentsOf: url)
+        large.name += "a"
+        #expect(throws: RuleArchive.ImportError.self) { try RuleArchive.export([large], to: url) }
+        #expect(try Data(contentsOf: url) == atLimit)
+        let newURL = directory.appendingPathComponent("new.json")
+        #expect(throws: RuleArchive.ImportError.self) { try RuleArchive.export([large], to: newURL) }
+        #expect(!FileManager.default.fileExists(atPath: newURL.path))
+    }
+
     @Test func invalidImportIsRejectedWithoutChangingSourceFile() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

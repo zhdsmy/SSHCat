@@ -61,7 +61,7 @@ Safe UI snapshots:
 
 Snapshots are available only in debug builds. They use temporary rules, isolated preferences, and `/bin/sh` as fake SSH. They do not read real rules or `~/.ssh/config`, change login items, or establish real SSH connections. Images are written to `build/snapshots-<language>[-dark]/`; English is the default.
 
-The scenes also cover field errors, state filters, the host picker, import preview, quit confirmation, and system permission states. The isolated harness checks actual port text editing, draft restoration after switching rules, and both quit-confirmation outcomes. Scrollable pages produce additional `-scroll-N` images. Snapshots exclude title bars and toolbars and do not replace full interaction testing of native file dialogs or System Settings. Switches in unfocused windows may look gray. Sample rule names stay the same across languages for comparison.
+The scenes also cover field errors, state filters, the host picker, import preview, quit confirmation, and system permission states. The isolated harness checks actual port text editing, draft restoration after switching rules, both quit-confirmation outcomes, and first/subsequent import sheets after cancellation. Scrollable pages produce additional `-scroll-N` images. Snapshots exclude title bars and toolbars and do not replace full interaction testing of native file dialogs or System Settings. Switches in unfocused windows may look gray. Sample rule names stay the same across languages for comparison.
 
 For development:
 
@@ -88,7 +88,7 @@ Unsaved edits, including empty or invalid port text, survive switching rules or 
 
 Use **Retry Now** on a failed connection or during a reconnect countdown to try immediately. **Copy First Connection Command** copies a command to run manually in Terminal, using the saved host, port, user, and key. It allows you to verify the host fingerprint and authenticate without starting forwards; SSHCat never runs this interactive command itself.
 
-IPv6 works for SSH hosts and forwarding addresses, with or without brackets: for example, `2001:db8::1` or `[2001:db8::1]`. The app adds brackets in forwarding arguments such as `[::1]:8080:[2001:db8::2]:8080`. Enter the SSH port in its own field. Scoped addresses such as `fe80::1%en0` are also supported. Conflict checks distinguish IPv4 and IPv6 listeners without doing DNS lookups; they cannot predict every hostname alias or listener opened by another app.
+IPv6 works for SSH hosts and forwarding addresses, with or without brackets: for example, `2001:db8::1` or `[2001:db8::1]`. The app adds brackets in forwarding arguments such as `[::1]:8080:[2001:db8::2]:8080`. Enter the SSH port in its own field. Scoped addresses such as `fe80::1%en0` are also supported. Conflict checks distinguish IPv4 and IPv6 listeners without doing DNS lookups; `localhost` matches `127.0.0.1` and `::1`, while other addresses in `127.0.0.0/8` remain independent. They cannot predict every hostname alias or listener opened by another app.
 
 Host suggestions expand relative `Include` paths from `~/.ssh`, plus absolute paths, `~/` paths, quoted paths, and globs. Cycles, unreadable files, and non-regular files are skipped; scanning is bounded to 16 include levels, 256 files, and 1 MiB. Suggestions do not evaluate `Host`/`Match` conditions or run `Match exec`; SSH still resolves the actual connection settings.
 
@@ -110,7 +110,7 @@ The equivalent command can be copied, but SSHCat itself always launches SSH usin
 
 ## Import, export, and system permissions
 
-Use the management toolbar's **Import and Export** menu to export the selected saved rule or all saved rules as v1 JSON. Complete invalid or unfinished rules before exporting. Import accepts up to 8 MB and 1,000 valid rules and shows a preview before writing anything. Rules with an existing ID or identical configuration are duplicates; choose to skip them or import copies. Existing rules are preserved, imported rules receive fresh IDs, and automatic startup is disabled. Import never connects them automatically. Key paths remain local paths; private keys are not included.
+Use the management toolbar's **Import and Export** menu to export the selected saved rule or all saved rules as v1 JSON. Complete invalid or unfinished rules before exporting. Import and export share a limit of 8 MiB and 1,000 valid rules per file. Export rejects oversized archives before writing, preserving any existing destination file; export individual rules if the full set exceeds the limit. Import shows the selected file’s rules in a preview before writing anything. Rules with an existing ID or identical configuration are duplicates; choose to skip them or import copies. Existing rules are preserved, imported rules receive fresh IDs, and automatic startup is disabled. Import never connects them automatically. Key paths remain local paths; private keys are not included.
 
 Settings shows macOS notification authorization separately from SSHCat's notification switch, with a link to System Settings. Login-item status also shows when macOS approval is pending and provides the appropriate Settings link. Status refreshes when the app becomes active again.
 

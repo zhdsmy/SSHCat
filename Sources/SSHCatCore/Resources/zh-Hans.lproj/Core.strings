@@ -45,5 +45,5 @@
 "validation.target_invalid" = "目标地址无效：%@";
 "validation.user_invalid" = "用户名不能含空白或 @，也不能以 - 开头";
 "runtime.manual_retry" = "手动重试";
-"import.too_large" = "导入文件最多 8 MB、1000 条规则。";
+"import.too_large" = "规则文件最多 8 MiB、1000 条规则。请减少每次导出的规则数量。";
 "import.invalid_rule" = "规则“%@”无效：%@";

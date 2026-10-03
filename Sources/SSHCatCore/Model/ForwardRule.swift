@@ -329,8 +329,8 @@ enum SSHToken {
         let a = bindIdentity(lhs), b = bindIdentity(rhs)
         if a == .any || b == .any || a == b { return true }
 
-        if a == .localhost { return b.isLoopback || b.isWildcard }
-        if b == .localhost { return a.isLoopback || a.isWildcard }
+        if a == .localhost { return b.isLocalhostListener || b.isWildcard }
+        if b == .localhost { return a.isLocalhostListener || a.isWildcard }
 
         switch (a, b) {
         case (.ipv4(let left), .ipv4(let right)):
@@ -363,6 +363,12 @@ enum SSHToken {
             case .ipv6(let bytes, _): return bytes.dropLast().allSatisfy { $0 == 0 } && bytes.last == 1
             default: return false
             }
+        }
+
+        /// SSH's localhost listener binds 127.0.0.1 and ::1, not the entire 127/8 range.
+        var isLocalhostListener: Bool {
+            if case .ipv4(let bytes) = self { return bytes == [127, 0, 0, 1] }
+            return isLoopback
         }
 
         var isWildcard: Bool {

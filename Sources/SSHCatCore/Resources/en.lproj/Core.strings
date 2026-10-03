@@ -45,5 +45,5 @@
 "validation.target_invalid" = "Invalid target address: %@";
 "validation.user_invalid" = "The username must not contain spaces or @, or start with -.";
 "runtime.manual_retry" = "Manual retry";
-"import.too_large" = "Import files can contain up to 8 MB and 1,000 rules.";
+"import.too_large" = "Rule files can contain up to 8 MiB and 1,000 rules. Export fewer rules at a time.";
 "import.invalid_rule" = "Rule “%@” is invalid: %@";
